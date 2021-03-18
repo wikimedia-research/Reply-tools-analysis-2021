@@ -191,7 +191,7 @@ edit_completions_bywiki_jc <- reply_edit_attempts_jc %>%
             n_attempts = n_distinct(edit_attempt_id),
             completion_rate = round(sum(edit_success) / n_attempts, 2),
             completion_rate_pct = paste0(round(sum(edit_success) / n_attempts *100, 1), "%"),
-            groups = 'drop'
+            .groups = 'drop'
   )  
   
 ```

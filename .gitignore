@@ -1,3 +1,4 @@
 Data/
 .RData
 .ipynb_checkpoints
+.Rproj.user

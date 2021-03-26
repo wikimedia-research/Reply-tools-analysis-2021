@@ -3,19 +3,17 @@ SELECT
     wiki AS wiki,
     event.user_id AS user_id,
     event.editing_session_id AS edit_attempt_id,
-    event.integration AS editor_type, 
-    event.editor_interface AS editor_interface,
+    event.integration AS editor_interface, 
     event.bucket AS test_group,
     event.is_oversample AS is_oversample,
     If(event.integration == 'discussiontools', 1, 0) AS reply_tool_used,
--- define edit attempt outcomes as 1 if the edit was published and 0 if it was not 
-    If(event.action == 'saveSuccess', 1, 0) AS edit_success,
+-- define edit attempt outcomes as 1 if the edit was published after an attempt and 0 if it was not 
+    If(SUM(CAST(event.action == 'saveSuccess' AS INT)) >=1, 1, 0) AS edit_success,
     CASE
         WHEN min(event.user_editcount) is NULL THEN 'undefined'
-        WHEN min(event.user_editcount) < 100 THEN 'under 100'
-        WHEN (min(event.user_editcount) >=100 AND min(event.user_editcount < 500)) THEN '100-499'
-        ELSE 'over 500'
-        END AS edit_count
+        WHEN min(event.user_editcount) < 100 THEN 'junior'
+        ELSE 'non-junior'
+        END AS experience_level
 FROM event.editattemptstep
 WHERE
     wiki IN ('frwiki', 'eswiki', 'itwiki', 'jawiki', 'fawiki', 'plwiki', 'hewiki', 'nlwiki',
@@ -43,7 +41,5 @@ GROUP BY
     event.editing_session_id,
     event.integration,
     event.bucket,
-    event.editor_interface,
     event.is_oversample,
-    If(event.integration == 'discussiontools', 1, 0),
-    If(event.action == 'saveSuccess', 1, 0) 
+    If(event.integration == 'discussiontools', 1, 0)

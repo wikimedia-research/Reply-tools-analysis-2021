@@ -145,7 +145,7 @@ grid::grid.raster(example_png, interpolate = TRUE)
 
 The team ran an AB test of the Reply Tool from 11 February 2021 through 10 March 2021 [^timeline] to assess the efficacy of this new feature, specifically on Junior Contributors (defined as having under 100 cumulative edits). The test included logged-in users that have not previously interacted with the reply tool  (defined as users whose `discussiontools-editmode` preference is empty) and viewed one of the 22 participating Wikipedias (see full list of [participating Wikipedias](https://www.mediawiki.org/wiki/Talk_pages_project#Active_initiatives)) during the duration of the AB test. During this test, 50% of users included in the test had the Reply tool automatically enabled, and 50% did not. Users at these Wikipedias were still able to turn the tool on or off the tool in Special:Preferences. 
 
-[^timeline] Note that we excluded data from from 2021 February 25 to 2021 March 1 in this analysis due to an [error](https://gerrit.wikimedia.org/r/c/mediawiki/extensions/WikimediaEvents/+/667690) in the sampling configuration that resulted in the loss of non-reply tool edit events. 
+[^timeline]: Note that we excluded data from from 2021 February 25 to 2021 March 1 in this analysis due to an [error](https://gerrit.wikimedia.org/r/c/mediawiki/extensions/WikimediaEvents/+/667690) in the sampling configuration that resulted in the loss of non-reply tool edit events. 
 
 You can find more information about features of this tool and project updates on the [project page](https://www.mediawiki.org/wiki/Talk_pages_project/Replying).
 
@@ -840,9 +840,9 @@ To evaluate any disruption caused by the reply tool, we determined the percent o
 ## Comment revert rate for Junior Contributors
 
 ### Methodology
-For this analysis, we reviewed data recorded in [mediawiki_history](https://wikitech.wikimedia.org/wiki/Analytics/Data_Lake/Edits/MediaWiki_history) to identify the percent comments posted by the reply tool (identified by the revision tag: `discussiontools-reply`) on talk pages that are reverted within 48 hours [^revert_study]. 
+For this analysis, we reviewed data recorded in [mediawiki_history](https://wikitech.wikimedia.org/wiki/Analytics/Data_Lake/Edits/MediaWiki_history) to identify the percent comments posted by the reply tool (identified by the revision tag: `discussiontools-reply`) on talk pages that are reverted within 48 hours [^revert]. 
 
-[^revert_study] 48 hours is a common cutoff, as research suggests that, at least for the English Wikipedia, nearly all reverts take place within 48 hours. Source: Research: Revert. Mediawiki. https://meta.wikimedia.org/wiki/Research:Revert.
+[^revert]: 48 hours is a common cutoff, as research suggests that, at least for the English Wikipedia, nearly all reverts take place within 48 hours. Source: Research: Revert. Mediawiki. https://meta.wikimedia.org/wiki/Research:Revert.
 
 We compared the revert rate for comments published using the reply tool to the revert rate for comments made using page editing during the same timeframe. 
 

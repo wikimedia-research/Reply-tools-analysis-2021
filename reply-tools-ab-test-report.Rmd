@@ -573,7 +573,7 @@ Since the model parameters are on the log-odds scale, we needed to apply the fol
 
 Based on estimates from the model, we found that Junior Contributors who open the reply tool are about 7 times more likely to successfully publish a comment than Junior Contributors who use page editing.
 
-We also found there is an average 45.3% increase (maximum 45.4% increase) in the probability of a Junior Contributor publishing a comment when they switch from using page editing to the reply tool.
+We also found there is an average 45% increase (maximum 49% increase) in the probability of a Junior Contributor publishing a comment when they switch from using page editing to the reply tool.
 
 We can confirm statistical significance at the 0.05 level for all of these estimates (as indicated by credible intervals that do not cross 1).
 

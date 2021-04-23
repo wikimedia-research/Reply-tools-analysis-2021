@@ -1,9 +1,10 @@
 ---
-title: "Reply Tools AB Test Report"
+title: "Reply Tool AB Test Report"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 author: 
 - affiliation: "Data Scientist, Wikimedia Foundation"
   name: "Megan Neisler"
+  abstract: "The Wikimedia Editing team ran an A/B test from 11 February 2021 through 10 March 2021 to assess the impact of the reply tool on talk page behavior. The test included all logged-in users that had not previously enabled the reply tool before and made a comment on 22 participating Wikipedias. Results indicated that the reply tool had a signficant impact on the comment completion rate of Junior Contributors. Estimates indicate that Junior Contributors are 7.2 times more likely to publish a comment they start on a talk page than junior contributors using wikitext page and section editing."
 output:
   html_document:
     fig_caption: yes
@@ -14,50 +15,24 @@ output:
     toc_float:
       collapsed: no
   pdf_document:
-    citation_package: natbib
     fig_height: 6
     fig_width: 15
     keep_tex: yes
     latex_engine: xelatex
-    template: svm-latex-ms.tex
+    template: svm-latex-ms
+fontsize: 11pt
+geometry: margin=1in
+header-includes:
+  - \usepackage{floatrow}
+  - \floatsetup[table]{capposition=bottom}
 ---
-
-
-# Introduction
-
-The Wikimedia Foundation's [Editing team](https://www.mediawiki.org/wiki/Editing_team#:~:text=The%20Editing%20team%20is%20the,tools%20like%20TemplateData%20and%20Citoid.) is working to improve how contributors communicate on Wikipedia using talk pages through a series of incremental improvements that will be released over time.
-
-As part of this effort, the Editing team introduced a new workflow for replying to specific comments with the intention of making participating productively on talk pages easier and more intuitive. The reply tool is an extra button that appears at the end of a post on a talk page (as shown in the screenshot below). When you click on it, it opens a reply form that automatically signs and indents wikitext talk page comments and offers a quick way for pinging other users among other features.
-
-```{r reply_screenshot, include = FALSE}
-example_png <- png::readPNG("Figures/DiscussionTools_Reply_visual_2021.png", info = TRUE)
-```
-
-The team ran an AB test of the Reply Tool from 11 February 2021 through 10 March 2021 to assess the efficacy of this new feature, specifically on Junior Contributors (defined as having under 100 cumulative edits). The test included logged-in users that had not used the Reply Tool before (defined as users whose `discussiontools-editmode` preference is empty) and attempted an edit at one of the 22 participating Wikipedias (see full list of [participating Wikipedias](https://www.mediawiki.org/wiki/Talk_pages_project#Active_initiatives)) during the duration of the AB test. During this test, 50% of all logged-in users at the Wikipedias included in the test had the Reply tool automatically enabled, and 50% did not. Users at these Wikipedias were still able to turn the tool on or off the tool in Special:Preferences. 
-
-You can find more information about features of this tool and project updates on the [project page](https://www.mediawiki.org/wiki/Talk_pages_project/Replying).
-
-# Purpose 
-
-The primary goal of the AB test was to test the hypothesis that using the reply tool will increase the likelihood of a Junior Contributor publishing a comment they start without a significant increase in disruption. 
-
-For this analysis, our key performance indicator to evaluate the impact of the tool is comment completion rate, which we define as:
-
-**Of the contributors who click the [ reply ] link, what percent of contributors successfully publish the comment they were drafting at least once during the reviewed timeframe.**
-
-We will assess disruption by looking at the percent of comments made to talk pages that are reverted within 48 hours and the percent of contributors who are blocked after making an edit to a talk page.
-
-The results of this analysis will be used to determine if the Reply Tool should be deployed as default to all Wiki projects, as an opt-out user preference.  Please see further details about the hypotheses, key performance indicators, and decision scenarios in the [task description](https://phabricator.wikimedia.org/T252057).
-
-
-
-# Methodology
 
 ```{r setup, include = FALSE}
 library(knitr)
 library(kableExtra)
 library(zeallot) 
 library(tidyverse)
+library(dplyr)
 # Tables:
 library(gt)
 library(gtsummary)
@@ -67,28 +42,150 @@ library(lme4)
 library(brms)
 library(tidybayes)
 set.seed(5)
+if (!"printr" %in% installed.packages()[, "Package"]) {
+  install.packages("printr", type = "source", repos = c("Yihui Xie" = "http://yihui.name/xran", CRAN = "http://cran.rstudio.com"))
+} else {
+  loadNamespace("printr")
+}
+is_html <- function() {
+  if (length(opts_knit$get("rmarkdown.pandoc.to")) > 0) {
+    return(opts_knit$get("rmarkdown.pandoc.to") == "html")
+  } else {
+    return(FALSE)
+  }
+}
+if (is_html()) {
+  options(knitr.table.format = "html")
+} else {
+  options(knitr.table.format = "latex")
+}
+opts_chunk$set(
+  echo = is_html(), warning = FALSE, message = FALSE,
+  out.width='\\textwidth', dev = 'png', fig.ext = 'png',
+  dpi = ifelse(is_html(), 150, 300)
+)
+path <- function(x) {
+  if (grepl("docs", getwd(), fixed = TRUE)) {
+    return(file.path("..", x))
+  } else {
+    return(x)
+  }
+}
 
 ```
-The AB test was run on a per Wikipedia basis and contributors included in the test were randomly assigned to either the control (reply tool disabled by default) or treatment (reply tool enabled by default) based on their user ID. Contributors within each group also had the option to explicilty turn the tool on or off in their preferences; however, these contributors remained in the same group they were bucketed in for the duration of the test. 
-
-Data was collected in [EditAttemptStep](https://gerrit.wikimedia.org/r/plugins/gitiles/schemas/event/secondary/+/refs/heads/master/jsonschema/analytics/legacy/editattemptstep/). We excluded data from from 2021 February 25 to 2021 March 1 in this analysis due to an [error](https://gerrit.wikimedia.org/r/c/mediawiki/extensions/WikimediaEvents/+/667690) in the sampling configuration that resulted in the loss of non-reply tool edit events.
-
-In this test, a user can complete a comment using the Reply Tool or using reply workflows available with wikitext page and section editing. For the purpose of this analysis, these two types of editing interfaces are defined as follows: 
 
 
-**Reply Tool Comment:** Any edit made with the reply tool to a page in a talk page namespace. The reply tool allows edits using both wikitext and source mode. Reply tool edits exclude any new sections or new pages created on a talk page using either the new discussion tool or wikitext editing and any corrective page edits. These events were sampled at 100%. 
+```{r captions, include=FALSE}
+# Manual figure captioning:
+library(captioner) 
+figure_caps <- captioner(prefix = "Figure")
+
+# Custom caption formatting and printing:
+format_caption <- function(caps, name) {
+  return({
+    sub(caps(name, display = "cite"),
+      paste0(ifelse(is_html(), "**", "\\textbf{"), caps(name, display = "cite"), ifelse(is_html(), "**", "}")),
+      caps(name, display = "full"), fixed = TRUE) %>%
+    sub("  ", " ", ., fixed = TRUE)
+  })
+}
+print_caption <- function(formatted_caption) {
+  cat(paste0('<p class = "caption">', formatted_caption, '</p>', collapse = ''))
+}
+
+# add fiture captiohns
+figure_caps(name = "Example", caption = "Example of the reply tool. The reply tool is an extra button that appears at the end of a post on a talk page. ")
+figure_caps(name = "Junior contributor completion rate", caption = "Percent of Junior Contributors that completed at least one comment attempt on a talk page during the AB test.")
+figure_caps(name = "Junior contributor completion rate by wiki", caption = "Percent of Junior Contributors that completed a comment attempt on a talk page. There were a limited number of AB test events recorded for Swahili, Afrikaans, and Egyptian Wikipedia and no recorded AB test events for Amharic and Oromo Wikipedia. As a result, these Wikipedia projects were removed from the chart above as we are not able to conclude any effects from the reply tool on these specific projects. ")
+figure_caps(name = "All contributor completion rate", caption = "Percent of contributors that completed a comment attempt on a talk page across all contributor experience levels and participating Wikipedias.")
+figure_caps(name = "All contributor completion rate by experience level", caption = "Percent of contributors that completed a comment attempt on a talk page by contributors’ experience level. A Junior Contributor is a contributor with under 100 cumulative edits and a non-Junior Contributor is a contributor with over 100 cumulative edits")
+figure_caps(name = "Conditional effects plot", caption = "The conditional effects of a Contributor’s experience level and type of editor used on the likelihood of completing an comment.")
+figure_caps(name = "Junior contributor revert rate", caption = "Percent of comments made by Junior Contributors on  talk pages that are reverted within 48 hours of being published. ")
+figure_caps(name = "Junior contributor revert rate by wiki", caption = "Percent of comments made by Junior Contributors on  talk pages that are reverted within 48 hours of being published. No published talk page comments were recorded for Oromo Wikipedia during the duration of the AB test and limited data were recorded for Afrikaans, Amharic,  Swahili , and Egyptian Wikipedias As a result, these Wikipedia projects were removed from the chart above as we are not able to accurately determine a revert rate representative of the population. ")
+figure_caps(name = "All contributor revert rate by experience level", caption = "Percent of comments made by contributors on  talk pages that are reverted by experience level. A Junior Contributor is a contributors with under 100 cumulative edits and a non-Junior Contributor is a contributor with over 100 cumulative edits")
+figure_caps(name = "Junior contributors blocked", caption = "Percent of Junior Contributors blocked after making a comment on a talk page.")
+figure_caps(name = "All contributors blocked by experience level", caption = "Percent of contributors blocked after making a comment on a talk page by experience level. Junior contributor defined as having under cumulative 100 edits. Non-Junior Contributor is defined as having over 100 cumulative edits")
+
+
+figure_caps(name = "Number of junior contributors", caption = "Number of Junior Contributors that made a comment by AB test group. The test group users were shown the reply tool enabled as default. Based on a sampling rate of 6.25% for all events. Any oversampled events were removed so data for the two editor types could be directly compared.")
+
+figure_caps(name = "Retention of junior contributors", caption = "Percent of Junior Contributors that made a comment and returned to make another comment. Week 1 is defined as 2-8 days following their first edit. Week 2 is defined as 9 to 15 days following their first edit ")
+figure_caps(name = "Retention of all contributors by experience level", caption = "Percent of Contributors that made a comment and returned to make another comment by experience level")
+
+
+```
+
+```{r links, echo=FALSE, results='asis'}
+if (is_html()) {
+  cat('<p>{ <a href="https://github.com/wikimedia-research/Reply-tools-analysis-2021/blob/master/reply-tools-ab-test-report.Rmd">RMarkdown Source</a> | <a href="https://github.com/wikimedia-research/Reply-tools-analysis-2021">Analysis Codebase</a> }</p>')
+} else {
+  cat('\\let\\thefootnote\\relax\\footnote{Source code and data are available on GitHub (\\href{https://github.com/wikimedia-research/Reply-tools-analysis-2021}{wikimedia-research/Reply-tools-analysis-2021})}')
+}
+```
+
+# Introduction
+
+The Wikimedia Foundation's [Editing team](https://www.mediawiki.org/wiki/Editing_team#:~:text=The%20Editing%20team%20is%20the,tools%20like%20TemplateData%20and%20Citoid.) is working to improve how contributors communicate on Wikipedia using talk pages through a series of incremental improvements that will be released over time.
+
+As part of this effort, the Editing team introduced a new workflow for replying to specific comments with the intention of making participating productively on talk pages easier and more intuitive. The reply tool is an extra button that appears at the end of a post on a talk page (as shown in the screenshot below). When you click on it, it opens a reply form that automatically signs and indents wikitext talk page comments and offers a quick way for pinging other users among other features [^screenshot].
+
+```{r reply_screenshot_cap, include = FALSE}
+example_cap <- format_caption(figure_caps, "Example")
+example_png <- png::readPNG("Figures/DiscussionTools_Reply_visual_2021.png", info = TRUE)
+example_dim <- attr(example_png, "info")$dim
+```
+
+```{r reply_screenshot, fig.width=ifelse(is_html(), 0.25, 1)*example_dim[1]/72, fig.height=ifelse(is_html(), 0.25, 1)*example_dim[2]/72, out.height='8in', fig.cap=example_cap, fig.align='center', echo=FALSE, out.width=NULL}
+grid::grid.raster(example_png, interpolate = TRUE)
+``` 
+
+
+[^screenshot]: [Screenshot](https://commons.wikimedia.org/wiki/File:DiscussionTools_Reply_visual_2021.png) available on [Wikimedia Commons](https://commons.wikimedia.org/wiki/Main_Page), licensed under [MIT Liscense](https://commons.wikimedia.org/wiki/Category:Expat/MIT_License).
+
+
+The team ran an AB test of the Reply Tool from 11 February 2021 through 10 March 2021 [^timeline] to assess the efficacy of this new feature, specifically on Junior Contributors (defined as having under 100 cumulative edits). The test included logged-in users that have not previously interacted with the reply tool  (defined as users whose `discussiontools-editmode` preference is empty) and viewed one of the 22 participating Wikipedias (see full list of [participating Wikipedias](https://www.mediawiki.org/wiki/Talk_pages_project#Active_initiatives)) during the duration of the AB test. During this test, 50% of users included in the test had the Reply tool automatically enabled, and 50% did not. Users at these Wikipedias were still able to turn the tool on or off the tool in Special:Preferences. 
+
+[^timeline] Note that we excluded data from from 2021 February 25 to 2021 March 1 in this analysis due to an [error](https://gerrit.wikimedia.org/r/c/mediawiki/extensions/WikimediaEvents/+/667690) in the sampling configuration that resulted in the loss of non-reply tool edit events. 
+
+You can find more information about features of this tool and project updates on the [project page](https://www.mediawiki.org/wiki/Talk_pages_project/Replying).
+
+# Purpose 
+
+The primary goal of the AB test was to test the hypothesis that using the reply tool will increase the likelihood of a Junior Contributor publishing a comment they start without a significant increase in disruption. 
+
+For this analysis, our key performance indicator to evaluate the impact of the tool is comment completion rate, which we define as:
+
+**Of the contributors that opened the Reply tool or page editing to make a comment, the percent of contributors that successfully published at least one comment on a talk page**
+
+We assessed disruption by looking at the percent of comments made to talk pages that are reverted within 48 hours and the percent of contributors who are blocked after making an edit to a talk page.
+
+The results of this analysis will be used to determine if the reply tool should be deployed as default to all Wiki projects, as an opt-out user preference.  Please see further details about the hypotheses, key performance indicators, and decision scenarios in the [task description](https://phabricator.wikimedia.org/T252057).
+
+
+# Methodology
+
+
+The AB test was run on a per Wikipedia basis and contributors included in the test were randomly assigned to either the control (reply tool disabled by default) or treatment (reply tool enabled by default) based on their user ID. Contributors within each group also had the option to explicitly turn the tool on or off in their preferences; however, these contributors remained in the same group they were bucketed in for the duration of the test. 
+
+
+Upon conclusion of the test on 10 March 2021, we recorded a total of 10,175 comment attempts initiated across both test groups by 4,690 distinct contributors across all experience levels. A total of 2,612 (55.7%) of these contributors were identified as Junior Contributors. Data was collected in [EditAttemptStep](https://gerrit.wikimedia.org/r/plugins/gitiles/schemas/event/secondary/+/refs/heads/master/jsonschema/analytics/legacy/editattemptstep/).
+
+In this test, a user can complete a comment using the Reply Tool or using reply workflows available with wikitext full-page and section editing. For the purpose of this analysis, these two types of editing experiences are defined as follows: 
+
+
+**Reply Tool Comment:** Any edit to a talk page namespace made with the reply tool. The reply tool allows edits using both wikitext and source mode. Reply tool edits exclude edits to create new sections or new pages on a talk page using either the new discussion tool or wikitext editing. Reply tool events were sampled at 100%. 
 
 Recorded in EditAttemptStep as: `event.action = 'init'`, `event.integration = 'discussiontools'`, `event.init_type = 'page'`
 
 
-**Non-Reply Tool Comment:**: Any edit to a talk page namespace that were not made with the reply tool and not edits to create new sections or new pages using wither the new disussion tool or wikitext editing. Note that it's possible that some of the edits were corrective edits (i.e fixing a signature) but current instrumentation does not decipher between this type of edit and a reply. These events were sampled at a rate of 1/16, or 6.125%
+**Page Editing Comment:** Any edit to a talk page namespace that was not made with the reply tool and not edits to create new sections or new pages using either the new discussion tool or wikitext editing. Note that it's possible that some of the edits were corrective edits (i.e fixing a signature) but current instrumentation does not decipher between this type of edit and a reply. These events were sampled at a rate of 1/16, or 6.125%
 
 Recorded in the EditAttemptStep as:  `event.action = 'init'`, `event.integration = 'page'` , `event.init_type = 'section' or 'page'`, `event.init_mechanism = 'click'`
 
 See the following Phabricator tickets for further details regarding instrumentation and implementation of the AB test:
 
 * Enable AB Test [T273554](https://phabricator.wikimedia.org/T273554)
-* AB Test turned off. [T276967](https://phabricator.wikimedia.org/T276967)
+* AB Test turned off [T276967](https://phabricator.wikimedia.org/T276967)
 * AB Test Instrumentation Changes [T273096](https://phabricator.wikimedia.org/T273096)
 * AB Test QA [T268193](https://phabricator.wikimedia.org/T268193)
 * AB Test Bucket Implementation [T268191](https://phabricator.wikimedia.org/T268191)
@@ -109,13 +206,21 @@ reply_edit_attempts <-
 reply_edit_attempts$attempt_dt <-
   as.Date(reply_edit_attempts$attempt_dt, format = "%Y-%m-%d")
 
-#clarfiy levels and labels for factor variables
+#set factor levels with correct baselines
 reply_edit_attempts$editor_interface <-
   factor(
     reply_edit_attempts$editor_interface,
     levels = c("page", "discussiontools"),
-    labels = c("Non-Reply Tool", "Reply Tool")
+    labels = c("Page editing", "Reply tool")
   )
+
+reply_edit_attempts$edit_success <-
+  factor(
+    reply_edit_attempts$edit_success,
+    levels = c(0, 1),
+    labels = c("Not Complete", "Complete")
+  )
+
 
 reply_edit_attempts$experience_level <-
   factor(reply_edit_attempts$experience_level,
@@ -164,36 +269,12 @@ reply_edit_attempts <- reply_edit_attempts  %>%
 ```
 
 
-# Overall AB test Comment Attempts and Users
 
-```{r reply_edit_attempts_jc_all, echo = FALSE}
-# Final Total Number of Attempts and Users
-reply_edit_attempts_jc_all <- reply_edit_attempts %>%
-    group_by(editor_interface, experience_level) %>%
-    summarise(total_users = n_distinct(user_id), 
-              total_attempts = n_distinct(edit_attempt_id),
-              .groups = 'drop'
-  )  %>%
-  gt()  %>%
-  tab_header(
-    title = "Overall Comment Distinct Users and Attempts in the Reply Tool AB Test"
-  )
+# Comment completion rate for Junior Contributors 
 
-reply_edit_attempts_jc_all
+We first calculated the comment completion rate for Junior Contributors by editing experience (i.e. Was the contributor able to successfully save at least one comment with or without using the reply tool?) overall and across each participating Wikipedia. 
 
-```
-
-Upon conclusion of the test on 10 March 2021, a total of 10,175 comment attempts were initiated across both test groups by contributors across all experience levels. Of those, there were 4,583 reply tool comment attempts by 2,049 distinct contributors and 5,592 non-reply tool comment attempts by 2,666 distinct contributors 
-
-(Note that it is possible for the same users to complete a comment using both of the comment editing interfaces (reply tool and non-reply tool). The `total_users` column in the table above reflects the number of distinct users that completed an edit using that particular editor interface)
-
-# Comment Completion Rate for Junior Contributors 
-
-We first calculated the comment completion rate for Junior Contributors by editor interface (i.e. Was the contributor able to sucessfully save at least one comment with or without using the reply tool?) overall and across each participating Wikipedia. 
-
-For this analysis, we are defining the comment completion rate as the percent of contributors that successfully publish (`event.action = 'saveSuccess'`) at least one comment they start on a talk page (`event.action = 'init'`). 
-
-FIXME: Add more detail regarding definition of comment completion rate and any assumptions (ie. contributors can have varying number of attempts, varying times they were able to use the tool, etc.)
+For this analysis, we are defining the comment completion rate as the percent of contributors that successfully published (`event.action = 'saveSuccess'`) at least one comment after opening a particular editing interface (`event.action = 'init'`) during the time of the AB test. Note that this does not take into account the number of attempts it took for the user to publish or the duration of their editing sessions.   
 
 
 ```{r reply_edit_attempts_jc, echo = FALSE }
@@ -202,8 +283,8 @@ reply_edit_completes_jc <- reply_edit_attempts %>%
     filter(experience_level == 'Junior Contributor')  %>%
     group_by (wiki, editor_interface, user_id) %>%
     summarise(n_attempts = n_distinct(edit_attempt_id),
-              n_completions = sum(edit_success),
-           edit_success = sum(n_completions >= 1),  #redefine edit success as user completed at least 1 edit attempt
+              n_completions = sum(edit_success == 'Complete'),
+              edit_success = ifelse(sum(n_completions >= 1), 'Complete', 'Not Complete'),  #redefine edit success as user completed at least 1 edit attempt
            reply_tool_used = as.integer(ifelse(sum(editor_interface == 'Reply Tool'), 1, 0)),
     .groups = 'drop') 
 
@@ -211,43 +292,96 @@ reply_edit_completes_jc <- reply_edit_attempts %>%
 
 
 
-## Overall Comment Completion Rate by Junior Contributors 
+
+## Overall comment completion Rrte by Junior Contributors 
+
 
 ```{r reply_edit_completes_jc_all, echo = FALSE}
 # Review edit completion rate by editor interface
 reply_edit_completes_jc_all <- reply_edit_completes_jc %>%
     group_by(editor_interface) %>%
     summarise(n_users = n_distinct(user_id), 
-              n_users_completed = sum(edit_success == 1), #user completed at least 1 edit
+              n_users_completed = sum(n_completions >= 1), #user completed at least 1 edit
               completion_rate = paste0(round(n_users_completed / n_users  *100, 1), "%"),
               .groups = 'drop'
-  )  %>%
+  ) 
+```
+
+```{r reply_edit_completes_jc_all_table, echo = FALSE}
+# Review edit completion rate by editor interface
+reply_edit_completes_jc_all_table <- reply_edit_completes_jc_all %>%
   gt() %>%
   tab_header(
-    title = "Junior Contributors Comment Completion Rate",
-    subtitle = "Across all Participating Wikipedias"
+    title = "Junior contributors comment completion rate",
+    subtitle = "across all participating Wikipedias"
   )  %>%
+  cols_label(
+    editor_interface = "Editing experience",
+    n_users = "Number of users attempted",
+    n_users_completed = "Number of users completed",
+    completion_rate = "Comment completion rate"
+  ) %>%
   tab_footnote(
-    footnote = "Defined as percent of contributors that make a comment attempt and publish at least 1 comment.",
+    footnote = "Defined as percent of contributors that made a comment attempt and publish at least 1 comment.",
     locations = cells_column_labels(
       columns = 'completion_rate'
     )
-  )
-reply_edit_completes_jc_all
+  ) %>%
+  tab_footnote(
+    footnote = "Sampling rate for Non-Reply Tool events is 6.25%",
+    locations = cells_body(
+      columns = 'editor_interface', rows = 1)
+    ) %>%
+  tab_footnote(
+    footnote = "Sampling rate for Reply Tool events is 100%",
+    locations = cells_body(
+      columns = 'editor_interface', rows = 2)
+    )
+  
+  
+reply_edit_completes_jc_all_table
 
 
 ```
 
+```{r jc_reply_edit_completions_cap, echo=FALSE}
+jc_reply_edit_completions_cap <- format_caption(figure_caps, "Junior contributor completion rate")
+```
+
+```{r jc_reply_edit_completions_plot, echo = FALSE, fig.cap =jc_reply_edit_completions_cap }
+# Plot edit completion rates for each user on each wiki  
+
+p <- reply_edit_completes_jc_all %>%
+    ggplot(aes(x= editor_interface, y = n_users_completed / n_users, fill = editor_interface)) +
+    geom_col(position = 'dodge') +
+    geom_text(aes(label = paste(completion_rate), fontface=2), vjust=1.2, size = 8, color = "white") +
+    scale_y_continuous(labels = scales::percent) +
+    scale_x_discrete(labels = c("Page editing", "Reply tool")) +
+    labs (y = "Percent of junior contributors ",
+          title = "Junior contributors comment completion rate \n across all participating Wikipedias")  +
+    theme_bw() +
+    scale_fill_brewer(palette="Set1")  +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 20),
+        axis.text.x = element_text(color = "grey20", size = 18,  hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
+        axis.title.x=element_blank(),
+        legend.position = "none")
+
+p
+ggsave("Figures/jc_reply_edit_completions_plot.png", p, width = 16, height = 8, units = "in", dpi = 300)
+```
 
 
-## Participating Wiki Comment Completion Rate by Junior Contributors 
+## Comment completion rate by participating Wikipedia 
 
 ```{r reply_edit_completes_jc_bywiki , echo = FALSE}
 # Review edit attempts by editor interface and wiki
 reply_edit_completes_jc_bywiki <- reply_edit_completes_jc %>%
     group_by(wiki, editor_interface) %>%
     summarise(n_users = n_distinct(user_id), 
-              n_users_completed = sum(edit_success == 1), #user completed at least 1 edit
+              n_users_completed = sum(n_completions >=1), #user completed at least 1 edit
               completion_rate = paste0(round(n_users_completed / n_users  *100, 1), "%"),
               .groups = 'drop'
   ) 
@@ -258,82 +392,99 @@ reply_edit_completes_jc_bywiki <- reply_edit_completes_jc %>%
 reply_edit_completes_jc_bywiki_tbl <- reply_edit_completes_jc_bywiki   %>%
   gt() %>%
   tab_header(
-    title = "Junior Contributors Comment Completion Rate By Participating Wikipedia"
+    title = "Junior contributors comment completion rate by participating Wikipedia"
   )  %>%
+  cols_label(
+    wiki = "Wikipedia",
+    editor_interface = "Editing experience",
+    n_users = "Number of users attempted",
+    n_users_completed = "Number of users completed",
+    completion_rate = "Completion rate"
+  ) %>%
   tab_footnote(
     footnote = "Defined as percent of contributors that make a comment attempt and publish at least 1 comment.",
     locations = cells_column_labels(
       columns = 'completion_rate'
     )
+  ) %>%
+  tab_footnote(
+    footnote = "Sampling rate for Non-Reply Tool events is 6.25%",
+     locations = cells_column_labels(
+      columns = 'editor_interface'
+    ) 
+    ) %>%
+  tab_footnote(
+    footnote = "Sampling rate for Reply Tool events is 100%",
+    locations = cells_column_labels(
+      columns = 'editor_interface'
+    )
   )
+
 
 reply_edit_completes_jc_bywiki_tbl 
 ```
 
 
-```{r jc_reply_edit_completions_bywiki_plot, echo = FALSE}
+```{r jc_reply_edit_completions_bywiki_cap, echo=FALSE}
+jc_reply_edit_completions_bywiki_cap <- format_caption(figure_caps, "Junior contributor completion rate by wiki")
+```
+
+
+```{r jc_reply_edit_completions_bywiki_plot, echo = FALSE, fig.cap =jc_reply_edit_completions_bywiki_cap }
 # Plot edit completion rates for each user on each wiki  
 
 p <- reply_edit_completes_jc_bywiki %>%
+    filter(!(wiki %in% c('Swahili Wikipedia', 'Afrikaans Wikipedia', 'Egyptian Wikipedia'))) %>% # remove wikis where there are under 10 events
     ggplot(aes(x= editor_interface, y = n_users_completed / n_users, fill = editor_interface)) +
     geom_col(position = 'dodge') +
+    geom_text(aes(label = paste(completion_rate), fontface=2), vjust=1.2, size = 5, color = "white") +
     facet_wrap(~ wiki) +
     scale_y_continuous(labels = scales::percent) +
     labs (y = "Percent of junior contributors ",
           x = "Editing interface",
           title = "Junior contributors comment completion rate by participating Wikipedia")  +
     theme_bw() +
-    scale_fill_brewer(name="Editing Interface", palette="Set1")  +
+    scale_fill_brewer(name="Editing experience", palette="Set1")  +
     theme(
-        plot.title = element_text(hjust = 0.5),
-        text = element_text(size=16),
+        plot.title = element_text(hjust = 0.5, size = 20),
+         axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
         axis.title.x=element_blank(),
         axis.text.x=element_blank(),
-        legend.position = "bottom")
+        strip.text.x = element_text(size = 12),
+        legend.position = "bottom",
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 18))
       
 p
 ggsave("Figures/jc_reply_edit_completions_bywiki_plot.png", p, width = 16, height = 8, units = "in", dpi = 300)
 ```
 
-Overall Junior Contributors had a much higher comment completion rate using the reply tool. 72.9% of all Junior Contributors that made a comment attempt were able to successfully publish at least 1 comment with the reply tool, while only 27.6% of all Junior Contributors successfully saved a non-reply tool comment. This represents a 164% observed increase in comment completion rate.
+Junior contributors had a much higher success rate posting a comment using the reply tool compared to page editing. Overall, 72.9% of all Junior Contributors that made a comment attempt were able to successfully publish at least 1 comment with the reply tool, while only 27.6% of all Junior Contributors successfully published a comment using page editing. This represents a 164% (2.6x) observed increase in comment completion rate.
 
-This trend is reflected across each participating Wikipedia as well. Junior Contributors had a higher comment completion rate using the reply tool compared to non-reply tool editor interfaces on every participating Wikipedia. Indonesian, Japanese, Dutch and Spanish Wikipedias saw the highest percent increases in comment completion rates with the reply tool. Notably, we observed the two lowest percent increase in edit completion rate for Persian (42% increase) and Hebrew Wikipedias (55%). These are both right-to-left languages, which might impact the reply tool experience and workflows for contributors on these projects.
+ This trend is reflected consistently for each participating Wikipedia as well.  Junior Contributors had a higher comment completion rate using the reply tool compared to non-reply tool editor interfaces on every participating Wikipedia. 
 
-Note: There were very few AB test events recorded for Swahuli, Afrikaans, and Egyptian Wikipedia and no recorded AB test events for Amharic and Oromo Wikipedia. As a result, we are not able to conclude any effects from the reply tool on these specific projects. FIXME: ADD AS FOOTNOTE TO TABLE and FIGURE.
+Indonesian, Japanese, Dutch and Spanish Wikipedias saw the highest percent increases in comment completion rates with the reply tool. We observed the two lowest percent increase in edit completion rate for Persian (42% increase) and Hebrew Wikipedias (55% increase). These are both right-to-left languages, which might impact the reply tool experience and workflows for contributors on these projects; however, we have limited data recorded for right to left languages in the AB test to confirm any impact from language direction.  
 
 
 ## Modeling the impact of the reply tool
 
-We next explored different models to correctly infer the impact of the reply tool on whether a comment was completed or not and account for the random effects by the user and wiki.
+We next explored different models to correctly infer the impact of the reply tool on whether a comment was completed or not and account for the random effects by the user and wiki. This allows us to confirm if the observed increase above is statistically significant (did not occur due to random chance).
 
-We first started with just a standard linear regression where use of the reply tool is the only predictor. In this case, we used a logistic regression model as the outcome (edit complete or not complete) is a binary variable. This model treats all edit attempts as independent and identically distributed and does not account from the effect of the user on the success probability of an edit.
+Comment attempts completed on the same Wikipedia and by the users on that Wikipedia are related to each other. Therefore, we can more accurately infer the impact of the reply tool by accounting for the effect of the user and wiki on the success probability of a Junior Contributor completing an edit.
 
-```{r glm_fit_jc, echo = FALSE}
-glm_fit_jc <- glm(
-    formula = edit_success ~ reply_tool_used, 
-    family = binomial(link = 'logit'),
-    data = reply_edit_completes_jc, 
-             )
-```
+We used a [Bayesian Hierarchical regression model](https://en.wikipedia.org/wiki/Bayesian_hierarchical_modeling) to model this structure. In this model, the user and Wikipedia are random effects and whether the reply tool was used is the fixed effect or predictor variable. 
 
-```{r glm_summary_table_jc, results='asis', echo=FALSE}
-glm_fit_jc_tbl <- glm_fit_jc %>%
-  tbl_regression(
-    label = list(reply_tool_used = "Using reply tool"),
-    intercept = TRUE
+`
+
+```{r reply_edit_completes_jc_factor, echo = FALSE }
+#redefine edit success as factor for use in the model
+reply_edit_completes_jc$edit_success <-
+  factor(
+    reply_edit_completes_jc$edit_success,
+    levels = c("Not Complete", "Complete")
   )
-glm_fit_jc_tbl
 ```
 
-
-Since the model parameters are on the log-odds scale, we need to take the exponentiation of the effect (exp(β~1~)) to determine the multiplicative effect on the odds of a Junior Contributor successfully publishing at least 1 comment.
-
-The estimates provided by this model indicate that the odds of a Junior Contributors publishing a comment are multiplied by 7.39 when using the new reply tool; however, this does not take into account the effects of the user and the Wikipedia on comment completion rates.
-
-
-Comment attempts completed on the same Wikipedia and by the users on that Wikipedia are related to each other. Therefore, we can more accurately infer the impact of the reply tool by incorporating the effects of the user and wiki into the model. 
-
-We used a [Bayesian Hierarchical regression model](https://en.wikipedia.org/wiki/Bayesian_hierarchical_modeling) to model this structure since comment attempts in our observed dataset are grouped by user and Wikipedia. In this model, the user and Wikipedia are random effects and whether the reply tool was used is the fixed effect or predictor variable. A Bayesian approach was used so that we can reason about the parameters (and other quantities) probabilistically.
 
 ```{r priors, echo = FALSE}
 priors <- c(
@@ -345,9 +496,9 @@ priors <- c(
 ```
 
 
-```{r  hrm_fit_jc, echo = FALSE, include = FALSE}
-hrm_fit_jc <- brm(
-  edit_success ~ reply_tool_used + (1 | wiki/user_id),
+```{r  fit_jc, echo = FALSE, include = FALSE}
+fit_jc <- brm(
+  edit_success ~ editor_interface + (1 | wiki/user_id),
   family = bernoulli(link = "logit"),
   data = reply_edit_completes_jc,
   prior = priors,
@@ -357,21 +508,16 @@ hrm_fit_jc <- brm(
 ```
 
 
-```{r hrm_fit_jc_summary, include= FALSE}
-summary(hrm_fit_jc )
-```
-
-
-```{r hrm_summary_table_jc, results='asis', echo=FALSE}
-hrm_fit_jc_tbl <- hrm_fit_jc  %>%
-  spread_draws(b_reply_tool_used, b_Intercept) %>%
+```{r fit_summary_table_jc, results='asis', echo=FALSE}
+fit_jc_tbl <- fit_jc  %>%
+  spread_draws(b_editor_interfaceReplytool, b_Intercept) %>%
   mutate(
-    exp_b = exp(b_reply_tool_used),
-    b4 = b_reply_tool_used / 4,
-    avg_lift =  plogis(b_Intercept + b_reply_tool_used) - plogis(b_Intercept)
+    exp_b = exp(b_editor_interfaceReplytool),
+    b4 = b_editor_interfaceReplytool / 4,
+    avg_lift =  plogis(b_Intercept + b_editor_interfaceReplytool) - plogis(b_Intercept)
   ) %>%
   pivot_longer(
-    b_reply_tool_used:avg_lift,
+    b_editor_interfaceReplytool:avg_lift,
     names_to = "param",
     values_to = "val"
   ) %>%
@@ -383,12 +529,12 @@ hrm_fit_jc_tbl <- hrm_fit_jc  %>%
   ) %>%
   mutate(
     quantity = ifelse(
-      param %in% c("b_Intercept", "b_reply_tool_used"),
+      param %in% c("b_Intercept", "b_editor_interfaceReplytool"),
       "Parameter", "Function of parameter(s)"
     ),
     param = factor(
       param,
-      c("b_Intercept", "b_reply_tool_used", "exp_b", "b4", "avg_lift"),
+      c("b_Intercept", "b_editor_interfaceReplytool", "exp_b", "b4", "avg_lift"),
       c("(Intercept)", "Using reply tool", "Multiplicative effect on odds", "Maximum Lift", "Average lift")
     ),
     ps = factor(ps, c(0.025, 0.5, 0.975), c("lower", "median", "upper")),
@@ -396,7 +542,7 @@ hrm_fit_jc_tbl <- hrm_fit_jc  %>%
   pivot_wider(names_from = "ps", values_from = "qs") %>%
   arrange(quantity, param)
 
-hrm_fit_jc_tbl%>%
+fit_jc_tbl%>%
   gt(rowname_col = "param", groupname_col = "quantity") %>%
   row_group_order(c("Parameter", "Function of parameter(s)")) %>%
   fmt_number(vars(lower, median, upper), decimals = 3) %>%
@@ -408,7 +554,7 @@ hrm_fit_jc_tbl%>%
   tab_style(cell_text(weight = "bold"), cells_row_groups()) %>%
   tab_footnote("CI: Credible Interval", cells_column_labels(vars(lower))) %>%
   tab_footnote(
-    html("Average lift = Pr(Success|Reply Tool) - Pr(Success|Non-Reply Tool) = logit<sup>-1</sup>(&beta;<sub>0</sub> + &beta;<sub>1</sub>) - logit<sup>-1</sup>(&beta;<sub>0</sub>)"),
+    html("Average lift = Pr(Success|Reply Tool) - Pr(Success|Page Editing) = logit<sup>-1</sup>(&beta;<sub>0</sub> + &beta;<sub>1</sub>) - logit<sup>-1</sup>(&beta;<sub>0</sub>)"),
     cells_body(vars(median), 3)
   ) %>%
   tab_footnote(
@@ -419,199 +565,289 @@ hrm_fit_jc_tbl%>%
 ```
 
 
-Since the model parameters are on the log-odds scale, we needed to apply transformations to make sense of them. We used the "divide-by-4" rule suggested by Gelman, Hill, and Vehtari 2021. [FIXME: LINK TO FULL REFERENCE] to approximate the maximum increase in the probability of success corresponding to which editing interface (reply tool or non-reply tool) was used. Using the bayesian model, we can also directly calculate the average lift.
+Since the model parameters are on the log-odds scale, we needed to apply the following transformations to make sense of them. 
+* We used the "divide-by-4" rule suggested by Gelman, Hill, and Vehtari 2021 [^Gelman] to approximate the maximum increase in the probability of success corresponding to which editing interface (reply tool or page editing) was used. Using the bayesian model, we can also directly calculate the average lift.
+* Since the model parameters are on the log-odds scale, we need to take the exponentiation of the effect (exp(β~1~)) to determine the multiplicative effect on the odds of a Junior Contributor successfully publishing at least 1 comment.
 
-Based on estimates from the model, we found that there is an average 45.5% increase (maximum 49.4% increase) in the probability of a Junior Contributor publishing a comment when they use the reply tool instead of a non-reply tool editing interface. We can confirm statistical significance at the 0.05 level for both of these estimates (as indicated by a credible interval that does not cross 1)
+[^Gelman]: Gelman, Andrew, Jennifer Hill, and Aki Vehtari. 2021. Regression and other stories. https://doi.org/10.1017/9781139161879.
 
-The model also indicates that the odds of a Junior Contributor publishing at least one successful edit are multiplied by 7.16 (95% CI: 5.8-9.5) when using the reply tool. 
+Based on estimates from the model, we found that Junior Contributors who open the reply tool are about 7 times more likely to successfully publish a comment than Junior Contributors who use page editing.
+
+We also found there is an average 45.3% increase (maximum 45.4% increase) in the probability of a Junior Contributor publishing a comment when they switch from using page editing to the reply tool.
+
+We can confirm statistical significance at the 0.05 level for all of these estimates (as indicated by credible intervals that do not cross 1).
 
 
-# Comment Completion Rate Across all Contributor Experience Levels [IN PROGRESS]
+# Accounting for experience level 
 
-As the purpose of this test, we primarily focused on determining if the reply tool had an impact on Junior Contributors' comment completion rate; however, we also reviewed the reply tool impact across all contributors' comment completion rates to provide insight into differences due to experience level.
+## Comment completion rate across all experience levels
+
+As the purpose of this test, we primarily focused on determining if the reply tool had an impact on Junior Contributors’ comment completion rate; however, we also reviewed the reply tool impact across all contributors’ comment completion rates to provide insight into differences due to experience level.
+
+In this analysis, we've defined experience level as two levels: junior and non-junior: Junior Contributors are contributors with under 100 cumulative edits and non-junior are contributors with over 100 cumulative edits. 
+
+Note that this binary definition doesn't fully capture the gradual growth of an editor. For example, using this binary definition,  a contributor with 99 edits would just have to make a 1 more edit to be redefined as a Senior Contributor and their probability of completing an edit would suddenly increase. Also, changes in lower edit counts (i.e. 1 to 2 edits) indicate a higher impact than changes in higher edit counts (e.g. 5,000 to 5,001 edits). However, we used the binary definition as it aligns with how we've defined the target audience and helps simplify the model for the purposes of this analysis.
+
 
 ```{r reply_edit_completes, echo = FALSE }
-# aggregate data to show ontributors that completed at least 1 edit by experience level
+#aggregate data to show ontributors that completed at least 1 edit by experience level
 reply_edit_completes <- reply_edit_attempts %>%
-    group_by (wiki, editor_interface, user_id, experience_level) %>%
-    summarise(n_attempts = n_distinct(edit_attempt_id),
-              n_completions = sum(edit_success),
-           edit_success = sum(n_completions >= 1),  #redefine edit success as user completed at least 1 edit
-           reply_tool_used = as.integer(ifelse(sum(editor_interface == 'Reply Tool'), 1, 0)),
-    .groups = 'drop') 
+  group_by (wiki, editor_interface, user_id, experience_level) %>%
+  summarise(n_attempts = n_distinct(edit_attempt_id),
+            n_completions = sum(edit_success == 'Complete'),
+            edit_success = sum(n_completions >= 1),  #redefine edit success as user completed at least 1 edit
+            reply_tool_used = as.integer(ifelse(sum(editor_interface == 'Reply Tool'), 1, 0)),
+            .groups = 'drop')
+
+
+```
+
+```{r reply_edit_completes_factor, echo = FALSE}
+#convert edit success as factor for use in the model
+reply_edit_completes$edit_success <-
+  factor(
+    reply_edit_completes$edit_success,
+    levels = c(0, 1),
+    labels = c("Not Complete", "Complete")
+  )
 
 
 ```
 
 
-## Overall Comment Completion Rate
-
-```{r reply_edit_completes_all, echo = FALSE}
+```{r reply_edit_completes_all , echo = FALSE}
 # Review edit completion rate by editor interface
 reply_edit_completes_all <- reply_edit_completes %>%
     group_by(editor_interface) %>%
     summarise(n_users = n_distinct(user_id), 
-              n_users_completed = sum(edit_success == 1), #user completed at least 1 edit
+              n_users_completed = sum(n_completions >= 1), #user completed at least 1 edit
               completion_rate = paste0(round(n_users_completed / n_users  *100, 1), "%"),
               .groups = 'drop'
-  )  %>%
+  )  
+
+```
+
+```{r reply_edit_completes_all_table, echo =FALSE}
+reply_edit_completes_all_table <- reply_edit_completes_all %>%
   gt() %>%
   tab_header(
-    title = "All Contributors Comment Completion Rate",
-    subtitle = "Across all Participating Wikipedias"
+    title = "Contributors comment completion rate",
+    subtitle = "Across all experience levels and participating Wikipedias"
   )  %>%
+  cols_label(
+    editor_interface = "Editing experience",
+    n_users = "Number of users attempted",
+    n_users_completed = "Number of users completed",
+    completion_rate = "Completion rate"
+  )   %>%
   tab_footnote(
     footnote = "Defined as percent of contributors that make a comment attempt and publish at least 1 comment.",
     locations = cells_column_labels(
       columns = 'completion_rate'
     )
-  )
-
-reply_edit_completes_all
-
-```
-
-
-## Participating Wiki Comment Completion Rate 
-
-```{r reply_edit_completes_bywiki , echo = FALSE}
-# Review edit attempts by editor interface and wiki
-reply_edit_completes_bywiki <- reply_edit_completes %>%
-    group_by(wiki, editor_interface) %>%
-    summarise(n_users = n_distinct(user_id), 
-              n_users_completed = sum(edit_success == 1), #user completed at least 1 edit
-              completion_rate = paste0(round(n_users_completed / n_users  *100, 1), "%"),
-              .groups = 'drop'
-  ) 
-```
-
-
-```{r reply_edit_completes_bywiki_tbl, echo = FALSE}
-reply_edit_completes_bywiki_tbl <- reply_edit_completes_bywiki   %>%
-  gt()  %>%
-  tab_header(
-    title = "All Contributors Comment Completion Rate By Participating Wikipedia"
-  )  %>%
+  ) %>%
   tab_footnote(
-    footnote = "Defined as percent of contributors that make a comment attempt and publish at least 1 comment.",
-    locations = cells_column_labels(
-      columns = 'completion_rate'
+    footnote = "Sampling rate for Non-Reply Tool events is 6.25%",
+    locations = cells_body(
+      columns = 'editor_interface', rows = 1)
+    ) %>%
+  tab_footnote(
+    footnote = "Sampling rate for Reply Tool events is 100%",
+    locations = cells_body(
+      columns = 'editor_interface', rows = 2)
     )
-  )
 
-reply_edit_completes_bywiki_tbl 
+reply_edit_completes_all_table 
+```
+
+```{r reply_edit_completes_all_cap, echo=FALSE}
+reply_edit_completes_all_cap  <- format_caption(figure_caps, "All contributor completion rate")
 ```
 
 
-```{r reply_edit_completions_bywiki_plot, echo = FALSE}
+```{r reply_edit_completes_all_plot, echo = FALSE, fig.cap =reply_edit_completes_all_cap }
 # Plot edit completion rates for each user on each wiki  
 
-p <- reply_edit_completes_bywiki %>%
+p <- reply_edit_completes_all %>%
     ggplot(aes(x= editor_interface, y = n_users_completed / n_users, fill = editor_interface)) +
     geom_col(position = 'dodge') +
-    facet_wrap(~ wiki) +
+    geom_text(aes(label = paste(completion_rate), fontface=2), vjust=1.2, size = 8, color = "white") +
     scale_y_continuous(labels = scales::percent) +
-    labs (y = "Percent of contributors ",
-          x = "Editing interface",
-          title = "All contributor comment completion rate by participating Wikipedia")  +
+    scale_x_discrete(labels = c("Page editing", "Reply tool")) +
+    labs (y = "Percent of junior contributors ",
+          title = "Contributors comment completion rate \n across all experience levels and participating Wikipedias")  +
     theme_bw() +
-    scale_fill_brewer(name="Editing Interface", palette="Set1")  +
+    scale_fill_brewer(palette="Set1")  +
     theme(
-        plot.title = element_text(hjust = 0.5),
-        text = element_text(size=16),
+        plot.title = element_text(hjust = 0.5, size = 20),
+        axis.text.x = element_text(color = "grey20", size = 18,  hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
         axis.title.x=element_blank(),
-        axis.text.x=element_blank(),
-        legend.position = "bottom")
-      
+        legend.position = "none")
+
 p
-ggsave("Figures/reply_edit_completions_bywiki_plot.png", p, width = 16, height = 8, units = "in", dpi = 300)
+ggsave("Figures/reply_edit_completes_all.png", p, width = 16, height = 8, units = "in", dpi = 300)
 ```
 
-Across all contributor experience levels, there was a 35% increase in the percent of contributors that were able to successfully publish a comment using the reply tool compared to using non-reply tool editing interfaces.
- 
-68.9% of contributors across all experience levels were able to publish one comment using the reply tool. This is slightly lower than the percent of Junior Contributors (72.9%) that published an comment using the reply tool.  However, the comment completion rate for non-reply tool comments is much higher when looking at contributors across all experience levels. 57.8% by Contributors across all experience levels were able to complete at least one comment using non-reply tool editing interfaces, compared to only 27% of Junior Contributors. 
+Across all contributor experience levels, there was a 35% increase in the percent of contributors that were able to successfully publish a comment using the reply tool compared to contributors using page editing methods. This percent change is much lower than what we found when focusing only on Junior Contributors' comment completion rates indicating that the experience level has a significant effect on the impact of the reply tool. 
 
-Based on this observed data, it appears that experience level has a small impact on the ability of contributors to publish a comment using the reply tool but a large impact on the ability of contributors able to publish a comment using non-reply tool editing interfaces.
+68.9% of Contributors across all experience levels were able to publish one comment using the reply tool. This is slightly lower than the percent of Junior Contributors (72.9%) that published a comment using the reply tool. However, the comment completion rate for page editing comments is much higher when looking at Contributors across all experience levels. 51.7% by Contributors across all experience levels were able to complete at least one comment using non-reply tool editing interfaces compared to only 27% of Junior Contributors.
 
-Reviewing each participating Wikipedia individually, we found that a higher percent of contributors across all experience levels were able to successfully publish at least 1 comment using the reply tool except for Hebrew Wikipedia, which had only a very slightly smaller percentage of contributors that were able to publish an edit using the repoy tool (-0.3% change). 
+Based on this observed data, it appears that experience level has a small impact on the ability of contributors to publish a comment using the reply tool but a large impact on the ability of contributors able to publish a comment using page editing.
 
-Note: There were very few AB test events recorded for Swahili, Afrikaans, and Egyptian Wikipedia and no recorded AB test events for Amharic and Oromo Wikipedia. As a result, we are not able to conclude any effects from the reply tool on these specific Wikis. 
+## Comment completion rate by experience level
+
+```{r reply_edit_completes_byexp , echo = FALSE}
+# Review edit completion rate by editor interface
+reply_edit_completes_byexp <- reply_edit_completes %>%
+    group_by(experience_level, editor_interface) %>%
+    summarise(n_users = n_distinct(user_id), 
+              n_users_completed = sum(n_completions >= 1), #user completed at least 1 edit
+              completion_rate = paste0(round(n_users_completed / n_users  *100, 1), "%"),
+              .groups = 'drop'
+  )  
+
+```
+
+```{r reply_edit_completes_byexp_table, echo = FALSE}
+reply_edit_completes_byexp_table <- reply_edit_completes_byexp %>%
+  gt() %>%
+  tab_header(
+    title = "Contributors comment completion rate by experience level",
+    subtitle = "Across all participating Wikipedias"
+  )  %>%
+  cols_label(
+    experience_level = "Experience level",
+    editor_interface = "Editing experience",
+    n_users = "Number of users attempted",
+    n_users_completed = "Number of users completed",
+    completion_rate = "Completion rate"
+  )   %>%
+  tab_footnote(
+    footnote = "Defined as percent of contributors that make a comment attempt and publish at least 1 comment.",
+    locations = cells_column_labels(
+      columns = 'completion_rate'
+    )
+  ) %>%
+  tab_footnote(
+    footnote = "Defined as having over 100 cumulative edits",
+    locations = cells_body(
+      columns = 'experience_level', rows = 1)
+    ) %>%
+  tab_footnote(
+    footnote = "Defined as having under 100 cumulative edits",
+    locations = cells_body(
+      columns = 'experience_level', rows = 3)
+    )
+
+reply_edit_completes_byexp_table
+```
+
+```{r reply_edit_completes_byexp_cap, echo=FALSE}
+reply_edit_completions_byexp_cap  <- format_caption(figure_caps, "All contributor completion rate by experience level")
+```
+
+
+```{r reply_edit_completes_byexp_plot, echo = FALSE, fig.cap =reply_edit_completions_byexp_cap }
+# Plot edit completion rates for each user on each wiki  
+
+p <- reply_edit_completes_byexp  %>%
+    ggplot(aes(x= editor_interface, y = n_users_completed / n_users, fill = editor_interface)) +
+    geom_col(position = 'dodge') +
+    geom_text(aes(label = paste(completion_rate), fontface=2), vjust=1.2, size = 8, color = "white") +
+    facet_wrap(~ experience_level) +
+    scale_y_continuous(labels = scales::percent) +
+    scale_x_discrete(labels = c("Page editing", "Reply tool")) +
+    labs (y = "Percent of junior contributors ",
+          title = "Contributors comment completion rate by experience level \n across all participating Wikipedias"
+          )+
+    theme_bw() +
+    scale_fill_brewer(palette="Set1")  +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 20),
+          strip.text.x = element_text(size = 18),
+        axis.text.x = element_text(color = "grey20", size = 18,  hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
+        axis.title.x=element_blank(),
+        legend.position = "none")
+
+p
+ggsave("Figures/reply_edit_completions_byexperience.png", p, width = 16, height = 8, units = "in", dpi = 300)
+```
+
+When comparing Junior Contributor comment completion rate to Non-Junior Contributors, we see a clear difference between the two experience levels. Junior contributors comment completion rate with page editing methods is lower than the comment completion rate observed for non-junior contributors during the AB test.  However, using the reply tool, Junior contributors' comment completion rate was almost the same as the Non-Junior contributors comment completion rate using page editing.
 
 
 ## Modeling the impact of the reply tool 
 
-To infer the impact of the reply tool, we applied the same models used when assessing the impact on Junior Contributor comment completion rate except we included comment attempts by all contributors in the model and added experience level as an interfaction term in the model since comment completion rates vary based on experience level. 
-
-```{r glm_fit, echo = FALSE}
-glm_fit <- glm(
-  formula = edit_success ~ reply_tool_used, 
-  family = binomial(link = 'logit'),
-  data = reply_edit_completes, 
-             )
-```
-
-```{r glm_summary_table, results='asis', echo=FALSE}
-glm_fit_tbl <- glm_fit %>%
-  tbl_regression(
-    label = list(new_interface = "Using reply tool"),
-    intercept = TRUE
-  )
-glm_fit_tbl
-```
+Since comment completion rates seem to vary significantly based on the contributor's experience level, we adjusted the Bayesian Hierarchical Regression Model to include the Contributors' experience level as an interaction term in the model in addition to the effects of the user and wiki on comment completion rate.
 
 
-The estimates provided by the standard linear regression model indicate that the odds of a Contributor publishing at least one successful cimment are multiplied by 2.08 when using the reply tool. 
+```{r  fit_all, echo = FALSE, include = FALSE}
 
-We then used the Bayesian Hierachical Regression Model to account for the effects the user or their experience level on edit completion rates. 
-
-
-```{r  hrm_fit, echo = FALSE, include = FALSE}
-
-hrm_fit <- brm(
-  edit_success ~ editor_interface * experience_level + (1 | user_id), # To account for user_id, we allow the intercept, represented by 1, to vary among  wiki and users within the wiki.
+fit_all <- brm(
+  edit_success ~ editor_interface * experience_level + (1 | wiki/user_id), 
   family = bernoulli(link = "logit"),
   data = reply_edit_completes,
   prior = priors,
   chains = 4, cores = 4
 )
+
 ```
 
-
-
-```{r conditional effect plot, echo = FALSE}
-conditional_effects(hrm_fit, effects = "experience_level:editor_interface") 
-
-
-#ggsave("Figures2/conditional_effects_plot.png", p, width = 16, height = 8, units = "in", dpi = 300)
+```{r conditional_effects_cap, echo=FALSE}
+conditional_effects_cap <- format_caption(figure_caps, "Conditional effects plot")
 ```
-FIXME: ADJUST FORMATTING ON CONDITIONAL EFFECTS PLOT
+
+```{r conditional_effects, echo = FALSE, fig.cap= conditional_effects_cap}
+conditional_effects <- conditional_effects(fit_all, effects = "experience_level:editor_interface")
+p <-  plot(conditional_effects, plot = FALSE)[[1]] +
+  labs (y = "Probability of comment completion",
+          title = "Effects of experience level and editor type \n on comment completion probability")  +
+    theme_bw() +
+    scale_color_brewer(palette="Set1") +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 20),
+        axis.text.x = element_text(color = "grey20", size = 18,  hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
+        axis.title.x=element_blank(),
+        legend.position = "right",
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 16))
+p
+ggsave("Figures/conditional_effects_exp_editor.png", p, width = 16, height = 8, units = "in", dpi = 300)    
+```
+
+The above plot shows the predicted effects of the Contributor's experience level and the type of editor that the used (reply tool vs page editing) on the probability of successfully publishing a comment that they started on a talk page. 
+
+Based on the model, we can confirm the following: 
+- A junior contributor is significantly more likely to successfully publish an edit than a junior contributor using page editing.
+- A junior contributor using the reply tool is, roughly, just as likely to post as a non-junior contributor using page editing.
+- A non-junior contributor using page editing is more likely to publish an edit using page editing then the reply tool.
+
+The higher comment completion rate we see for Non-Junior Contributors may be due a tendency to stick with what they already know. In addition, our page editing definition currently includes corrective edits made to the page which are frequently conducted by more Senior Contributors and also not possible with the reply tool. 
+
+# Guardrail analysis
+
+We also wanted to ensure that enabling the reply tool did not result in an increase in the number of disruptive edits being made to talk pages. 
+
+To evaluate any disruption caused by the reply tool, we determined the percent of comments made to talk pages that were reverted within 48 hours and the percent of contributors blocked after making a comment to a talk page.  
 
 
-The above plot shows the predicted effects of the two interaction variables that impact a contributors' likelihood to successfully publish at least 1 comment after making an attempt: (1) the editor interface used to make the comment and (2) the contributors' experience level based on their cumulative edits. 
-
-The plot indicates that experience level has a signficant impact on comment completion rate for comments made with the non-reply tool. 
-
-FIXME: REVIEW/CONFIRM RESULTS AND COMPLETE ANALYSIS ON REPLY TOOL IMPACT AND EXPERIENCE LEVEL ON ALL CONTRIBUTORS SUCCESS USING THE REPLY TOOL.
-
-# Guardrail Analysis
-
-We also wanted to ensure that the reply tool did not result in an increase in the number of distruptive edits being made to talk pages. 
-
-To evaluate any disruption caused by the reply tool, we determined the percent of comments made to talk pages that were reverted within 48 hours and the percent of contributors blocked after makeing a comment to a talk page.  
-
-
-## Comment Revert Rate for Junior Contributors
+## Comment revert rate for Junior Contributors
 
 ### Methodology
-For this analysis, we reviewed data recorded in [mediawiki_history](https://wikitech.wikimedia.org/wiki/Analytics/Data_Lake/Edits/MediaWiki_history) to identify the percent comments posted by the reply tool (identified by the revision tag: `discussiontools-reply`) on talk pages that are reverted within 48 hours [1]. We compared the revert rate for comments published using the reply tool to the revert rate for comments made by non-reply tool editing interfaces during the same time frame. 
+For this analysis, we reviewed data recorded in [mediawiki_history](https://wikitech.wikimedia.org/wiki/Analytics/Data_Lake/Edits/MediaWiki_history) to identify the percent comments posted by the reply tool (identified by the revision tag: `discussiontools-reply`) on talk pages that are reverted within 48 hours [^revert_study]. 
 
-[1] 48 hours is a common cutoff, as research suggests that, at least for the English Wikipedia, nearly all reverts take place within 48 hours
+[^revert_study] 48 hours is a common cutoff, as research suggests that, at least for the English Wikipedia, nearly all reverts take place within 48 hours. Source: Research: Revert. Mediawiki. https://meta.wikimedia.org/wiki/Research:Revert.
+
+We compared the revert rate for comments published using the reply tool to the revert rate for comments made using page editing during the same timeframe. 
 
 The reviewed data excludes wikitext edits to create new pages and edits to start new topics using the [new discussion tool](https://www.mediawiki.org/wiki/Talk_pages_project/New_discussion). 
 
-NOTE/FIXME: 
-* The Mediawiki_history dataset is updated monthly. At the time of this analysis, March 2021 editing attempts had not yet been logged so the data in the section below reflect edits recorded from the start of the AB Test on 2021 February 12 through the end of February Data will be updated when available.
-* Include Additional Breakdown by Reply Tool Wikitext vs Reply Tool Visual if possible.
 
 ```{r edit_revert_data, cache=TRUE, include=FALSE}
 reply_edit_reverts <-
@@ -630,7 +866,7 @@ reply_edit_reverts$editing_interface <-
   factor(
     reply_edit_reverts$editing_interface,
     levels = c("non-reply-tool", "reply-tool"),
-    labels = c("Non-Reply Tool", "Reply Tool")
+    labels = c("Page editing", "Reply tool")
   )
 reply_edit_reverts$experience_level <-
   factor(reply_edit_reverts$experience_level,
@@ -679,35 +915,82 @@ reply_edit_reverts_jc <- reply_edit_reverts %>%
     filter(experience_level == 'Junior Contributor') 
 ```
 
-## Overall revert rate by editor type
+### Overall revert rate by editor type
 ```{r reply_reverts_overall_jc, echo = FALSE}
+# aggregrate based on editing experience type
 reply_reverts_overall_jc <- reply_edit_reverts_jc %>%
     group_by(editing_interface) %>%
     summarise(total_reverts = sum(num_reverts),
               total_comments = sum(num_comments),
-              revert_rate =paste(round(total_reverts/total_comments * 100, 2), '%'), .groups = 'drop') %>%
+              revert_rate =paste(round(total_reverts/total_comments * 100, 2), '%'), .groups = 'drop') 
+
+```
+
+```{r reply_reverts_overall_jc_table , echo = FALSE}
+reply_reverts_overall_jc_table <- reply_reverts_overall_jc %>%
   gt()  %>%
   tab_header(
-    title = "Overall Junior Contributors Comment Revert Rate",
-    subtitle = "Across all Participating Wikipedias"
+    title = "Junior contributors comment revert rate across all participating Wikipedias",
+    subtitle = "Across all participating Wikipedias"
   )  %>%
+  cols_label(
+    editing_interface = "Editing experience",
+    total_reverts = "Number of comments reverted",
+    total_comments = "Number of comments published",
+    revert_rate = "Revert rate"
+  ) %>%
+
   tab_footnote(
     footnote = "Defined as percent of comments reverted within 48 hours.",
     locations = cells_column_labels(
       columns = 'revert_rate'
     )
-  )
+  )  %>%
+  tab_footnote(
+    footnote = "Data comes from mediawiki_history",
+    locations = cells_column_labels(
+      columns = 'editing_interface'
+    )
+  ) 
 
-reply_reverts_overall_jc
+reply_reverts_overall_jc_table
+
 ```
 
 
-Overall, across all paticipating Wikipedia, comments made by Junior Contributors with the reply tool have a significantly lower revert rate (1.65%) compared to comments made with non-reply tool editing interfaces (11.37%). 
+```{r reply_reverts_overall_jc_cap, echo=FALSE}
+reply_reverts_overall_jc_cap <- format_caption(figure_caps, "Junior contributor revert rate")
+```
 
+```{r reply_reverts_overall_jc_plot, echo = FALSE, fig.cap =reply_reverts_overall_jc_cap }
+# Plot edit completion rates for each user on each wiki  
 
-## Revert Rate by Wiki
+p <- reply_reverts_overall_jc %>%
+    ggplot(aes(x= editing_interface, y = total_reverts/ total_comments, fill = editing_interface)) +
+    geom_col(position = 'dodge') +
+    geom_text(aes(label = paste(revert_rate), fontface=2), vjust=1.2, size = 8, color = "white") +
+    scale_y_continuous(labels = scales::percent) +
+    scale_x_discrete(labels = c("Page editing", "Reply tool")) +
+    labs (y = "Percent of comments reverted ",
+          title = "Junior contributors comment revert rate across \n all participating Wikipedias")  +
+    theme_bw() +
+    scale_fill_brewer(palette="Set1")  +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 20),
+        axis.text.x = element_text(color = "grey20", size = 18,  hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
+        axis.title.x=element_blank(),
+        legend.position = "none")
+
+p
+ggsave("Figures/reply_reverts_overall_jc.png", p, width = 16, height = 8, units = "in", dpi = 300)
+```
+Overall, across all participating Wikipedia, we observed a 79.5% decrease in the revert rate for comments made with the reply tool compared to page editing. The reply tool seems to enable Junior Contributors to not only successfully complete a comment but reduce the number of errors in the published comment that might lead to the comment to being reverted. 
+
+### Revert rate by wiki
 ```{r reply_reverts_bywiki_jc, echo = FALSE}
-
+# aggregrate data by wiki and editing interface
 reply_reverts_bywiki_jc <- reply_edit_reverts_jc %>%
     group_by(wiki, editing_interface) %>%
     summarise(total_reverts = sum(num_reverts),
@@ -720,35 +1003,54 @@ reply_reverts_bywiki_jc <- reply_edit_reverts_jc %>%
 reply_edit_reverts_bywiki_tbl_jc <- reply_reverts_bywiki_jc    %>%
   gt()  %>%
   tab_header(
-    title = "Junior Contributors Comment Revert Rate By Participating Wikipedia"
+    title = "Junior Contributors comment revert rate by participating Wikipedia"
   )  %>%
+  cols_label(
+    wiki = "Wikipedia",
+    editing_interface = "Editing experience",
+    total_reverts = "Number of comments reverted",
+    total_comments = "Number of comments published",
+    revert_rate = "Revert rate"
+  ) %>%
   tab_footnote(
     footnote = "Defined as percent of comments reverted within 48 hours.",
     locations = cells_column_labels(
       columns = 'revert_rate'
     )
-  )
+  ) %>%
+  tab_footnote(
+    footnote = "Data comes from mediawiki_history. Sampling rate is 100% all events",
+    locations = cells_column_labels(
+      columns = 'editing_interface'
+    )
+  ) 
 
 reply_edit_reverts_bywiki_tbl_jc
 ```
 
+```{r jc_reply_reverts_bywiki_cap, echo=FALSE}
+jc_reply_reverts_bywiki_cap <- format_caption(figure_caps, "Junior contributor revert rate by wiki")
+```
 
 
-```{r jc_reply_reverts_bywiki_plot, echo = FALSE}
+```{r jc_reply_reverts_bywiki_plot, echo = FALSE, fig.cap = jc_reply_reverts_bywiki_cap}
 # Plot edit completion rates for each user on each wiki  
 
 p <- reply_reverts_bywiki_jc   %>%
+    filter(!wiki %in% c("Afrikaans Wikipedia", "Amharic Wikipedia", "Swahili Wikipedia", "Egyptian Wikipedia", "Oromo Wikipedia"))  %>% #remove projects with limited data
     ggplot(aes(x= editing_interface, y = total_reverts/total_comments, fill = editing_interface)) +
     geom_col(position = 'dodge') +
+    geom_text(aes(label = paste(revert_rate), fontface=2), vjust=1.2, size = 5, color = "white") +
     facet_wrap(~ wiki) +
     scale_y_continuous(labels = scales::percent) +
     labs (y = "Percent of comments reverted ",
           title = "Junior contributors comment revert rate by participating Wikipedia")  +
     theme_bw() +
-    scale_fill_brewer(name="Editing Interface", palette="Set1")  +
+    scale_fill_brewer(name="Editing experience", palette="Set1")  +
     theme(
         plot.title = element_text(hjust = 0.5),
         text = element_text(size=16),
+         strip.text.x = element_text(size = 12),
         axis.title.x=element_blank(),
         axis.text.x=element_blank(),
         legend.position = "bottom")
@@ -757,21 +1059,19 @@ p
 ggsave("Figures/jc_reply_reverts_bywiki_plot.png", p, width = 16, height = 8, units = "in", dpi = 300)
 ```
 
+Some per participating Wikipedia trend highlights :
 
-Note: No published talk page comments were recorded for Oromo Wikipedia during the duration of the AB test and no reverts were recorded for Afrikanns, Amharic or Swahili Wikipedias. Additionally, Bengali and Egyptian Wikipedia did not have enough comments recoded to accurately determine a revert rate representative of the populaton. 
+* Comments made with the reply tool had lower revert rates compared to comments made with non-reply tool editing on each participating Wikipedias.
+* We observed the highest reply tool revert rates on Bengali Wikipedia (9.09%), Spanish Wikipedia (7.44%), and Indonesian Wikipedia (5.88%). Reply tool revert rates for all the other participating Wikipedias were under 5%.
 
-FIXME: ADD ABOVE NOTE AS FOOTNOTE ON ABOVE TABLES AND CHARTS
 
-Some per Participating Wiki trend highlights :
 
-* Comments made with the reply tool had lower revert rates comparted to comments made with non-reply tool editing on each participating Wikipedias, with the exception of Bengali Wikipedia (Bengali only had 3 recorded comments at the time of this analysis so additional data will be needed to confirm)
-* We observed the highest Reply Tool revert rates on Chinese Wikipedia (6.06%), Spanish Wikipedia (3.96%), and Japanese Wikipedia (2.74%) . Reply tool revert rates for the other participating Wikipedias were under 2%.
-
-## Revert Rate By Experience Level
+### Revert rate By experience level
 
 ```{r reply_reverts_byexperience, echo = FALSE}
+# aggregate data based on editor and experience level
 reply_reverts_byexperience <- reply_edit_reverts %>%
-    group_by(editing_interface, experience_level) %>%
+    group_by(experience_level, editing_interface) %>%
     summarise(total_reverts = sum(num_reverts),
               total_comments = sum(num_comments),
               revert_rate =paste(round(total_reverts/total_comments * 100, 2), '%'), .groups = 'drop')
@@ -782,51 +1082,77 @@ reply_reverts_byexperience <- reply_edit_reverts %>%
 reply_reverts_byexperience_tbl <- reply_reverts_byexperience   %>%
   gt()  %>%
   tab_header(
-    title = "Contributors Comment Revert Rate By Experience Level"
+    title = "Contributors comment revert rate by experience level"
   )  %>%
+  cols_label(
+    experience_level = "Experience level",
+    editing_interface = "Editing experience",
+    total_reverts = "Number of comments reverted",
+    total_comments = "Number of comments published",
+    revert_rate = "Revert rate"
+  ) %>%
   tab_footnote(
     footnote = "Defined as percent of comments reverted within 48 hours.",
     locations = cells_column_labels(
       columns = 'revert_rate'
     )
-  )
+  )%>%
+  tab_footnote(
+    footnote = "Data comes from mediawiki_history",
+    locations = cells_column_labels(
+      columns = 'editing_interface'
+    )
+  ) %>%
+  tab_footnote(
+    footnote = "Junior contributor defined as having under cumulative 100 edits. Non-Junior Contributor is defined as having over 100 cumulative edits",
+    locations = cells_column_labels(
+      columns = 'experience_level'
+    )
+  ) 
 
 reply_reverts_byexperience_tbl
 ```
 
-```{r reply_reverts_byexperience_plot, echo = FALSE}
+```{r reply_reverts_byexperience_cap, echo=FALSE}
+reply_reverts_byexperience_cap <- format_caption(figure_caps, "All contributor revert rate by experience level")
+```
+
+
+```{r reply_reverts_byexperience_plot, echo = FALSE, fig.cap = reply_reverts_byexperience_cap }
 # plot proportion of edit complets by use of reply tool and experience level
 
 p <- reply_reverts_byexperience   %>%
   ggplot(aes(x= editing_interface , y = total_reverts/total_comments, fill = editing_interface)) +
   geom_col(position = 'dodge') +
+  geom_text(aes(label = paste(revert_rate),fontface=2), vjust=1.2, size = 8, color = "white") +
   scale_y_continuous(labels = scales::percent) +
   facet_grid(~ experience_level) +
   labs (y = "Percent of comments reverted",
         x = "Editing interface",
-        title = "Contributor comment revert rate by experience level")  +
+        title = "Contributor comment revert rate by experience level \n across all participating Wikipedias")  +
   theme_bw() +
-  scale_fill_brewer(name="Editing interface", palette="Set1")  +
-   theme(
-    plot.title = element_text(hjust = 0.5),
-    text = element_text(size = 16),
-    axis.title.x = element_blank(),
-    axis.text.x = element_blank(),
-    legend.position = "bottom"
-  )
+  scale_fill_brewer(name="Editing experience", palette="Set1")  +
+   theme(plot.title = element_text(hjust = 0.5, size = 20),
+          strip.text.x = element_text(size = 18),
+        axis.text.x = element_text(color = "grey20", size = 18,  hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
+        axis.title.x=element_blank(),
+        legend.position = "none")
 
 p
 
 ggsave("Figures/reply_reverts_byexperiencelevel.png", p, width = 16, height = 8, units = "in", dpi = 300)
 ```
 
-For non-junior contributors (any contributors that has made more than 100 cumulative edits), the reply tool and non-reply tool have similar comment revert rates.(1.64% for non-reply tool comments vs. 2.11% for the reply tool comments). In contrast, there is a significant difference in revert rates between the two editing interface types for Junior Contributors. Using non-reply tool editing interfaces, 11.65% of all Junior Contributor comments are reverts compared to 1.65% of all comments made with the reply tool.  
+Similar to our finding for comment completion rate, experience level has an impact on the revert rate for comments published using page editing. 
+We see just a slightly higher revert rate for the reply tool for Junior Contributors compared to Non-Junior Contributors but there is a significant difference in page editing revert rates between the two experience level groups.
 
 
 ## Percent of Junior Contributors blocked after posting a comment
 We also reviewed the number of Junior Contributors blocked after posting a comment using the reply tool.
 
-Data comes from the mediawiki_user_history table. All block events identified in the data by `caused_by_event_type = "alterblocks"`. The data includes any Contributors that was blocked after posting a comment; however, we do not know if they were blocked specifically due to the comment posted. Data is also currently limited to dates of the AB test. Users may have been blocked following this analysis.
+Data comes from the [mediawiki_user_history](https://wikitech.wikimedia.org/wiki/Analytics/Data_Lake/Edits/Mediawiki_user_history) table. All block events were identified in the data by `caused_by_event_type = "alterblocks"`. The data includes any Contributors that were blocked after posting a comment; however, we do not know if they were blocked specifically due to the comment posted. Data is also currently limited to dates of the AB test. Users may have been blocked following this analysis.
 
 ```{r blocked_users_data, cache=TRUE, include=FALSE}
 blocked_reply_users <-
@@ -844,7 +1170,7 @@ blocked_reply_users$editing_interface <-
   factor(
     blocked_reply_users$editing_interface,
     levels = c("non-reply-tool", "reply-tool"),
-    labels = c("Non-Reply Tool", "Reply Tool")
+    labels = c("Page editing", "Reply tool")
   )
 blocked_reply_users$experience_level <-
   factor(blocked_reply_users$experience_level,
@@ -891,25 +1217,75 @@ blocked_reply_users_jc <- blocked_reply_users %>%
 
 
 
-## Blocked Users Overall
+### Blocked users overall
 ```{r blocked_users_overall_jc, echo = FALSE}
 blocked_users_overall_jc <- blocked_reply_users_jc %>%
     group_by(editing_interface) %>%
     summarise(total_blocked_users = sum(blocked_user),
               total_users = sum(all_users),
               pct_blocked = paste(round(total_blocked_users/total_users * 100, 2), "%"), 
-              .groups = 'drop') %>%
+              .groups = 'drop') 
+```
+
+```{r blocked_users_overall_jc_table, echo = FALSE}
+blocked_users_overall_jc_table <- blocked_users_overall_jc %>%
   gt() %>%
   tab_header(
-    title = "Junior Contributors Blocked After Publishing a Comment "
-  )  
+    title = "Junior contributors blocked after publishing a comment "
+  )  %>%
+  cols_label(
+    editing_interface = "Editing experience",
+    total_blocked_users = "Number of users blocked",
+    total_users = "Number of users that made a comment",
+    pct_blocked = "Percent of users blocked"
+  ) %>%
+  tab_footnote(
+    footnote = "Data comes from mediawiki_history and mediawiki_user_history",
+    locations = cells_column_labels(
+      columns = 'editing_interface'
+    )
+  ) %>%
+  tab_footnote(
+    footnote = "Percent of junior contributors blocked after posting a comment during the AB test",
+    locations = cells_column_labels(
+      columns = 'pct_blocked'
+    )
+  )
 
+```
 
-blocked_users_overall_jc
+```{r blocked_users_overall_jc_cap, echo=FALSE}
+blocked_users_overall_jc_cap <- format_caption(figure_caps, "Junior contributors blocked")
 ```
 
 
-## Blocked Users By Wiki
+```{r blocked_users_overall_jc_plot, echo = FALSE, fig.cap = blocked_users_overall_jc_cap }
+# plot proportion of edit complets by use of reply tool and experience level
+
+p <- blocked_users_overall_jc %>%
+  ggplot(aes(x= editing_interface, y = total_blocked_users/total_users, fill = editing_interface)) +
+  geom_col(position = 'dodge') +
+  geom_text(aes(label = paste(pct_blocked),fontface=2), vjust=1.2, size = 8, color = "white") +
+  scale_y_continuous(labels = scales::percent) +
+  labs (y = "Percent of Junior Contributors blocked",
+        x = "Editing interface",
+        title = "Percent of junior contributors blocked after posting a comment on a talk page \n across all participating Wikipedias")  +
+  theme_bw() +
+  scale_fill_brewer(name="Editing experience", palette="Set1")  +
+   theme(plot.title = element_text(hjust = 0.5, size = 20),
+          strip.text.x = element_text(size = 18),
+        axis.text.x = element_text(color = "grey20", size = 18,  hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
+        axis.title.x=element_blank(),
+        legend.position = "none")
+
+p
+
+ggsave("Figures/blocked_users_overall.png", p, width = 16, height = 8, units = "in", dpi = 300)
+```
+
+### Blocked Users By Wiki
 ```{r blocked_users_bywiki_jc, echo = FALSE}
 blocked_users_bywiki_jc <- blocked_reply_users_jc %>%
     group_by(wiki, editing_interface) %>%
@@ -919,28 +1295,50 @@ blocked_users_bywiki_jc <- blocked_reply_users_jc %>%
               .groups = 'drop')
 ```
 
+
 ```{r blocked_users_bywiki_jc_tbl, echo = FALSE}
 blocked_users_bywiki_jc_tbl <- blocked_users_bywiki_jc   %>%
   gt() %>%
   tab_header(
-    title = "Junior Contributors Blocked After Publishing a Comment By Participating Wikipedia "
+    title = "Junior Contributors blocked after publishing a comment by participating Wikipedia "
+  )  %>%
+  cols_label(
+    wiki = "Wikipedia",
+    editing_interface = "Editing experience",
+    total_blocked_users = "Number of users blocked",
+    total_users = "Number of users that made a comment",
+    pct_blocked = "Percent of users blocked"
+  ) %>%
+
+  tab_footnote(
+    footnote = "Data comes from mediawiki_user_history",
+    locations = cells_column_labels(
+      columns = 'editing_interface'
+    )
+  ) %>%
+  tab_footnote(
+    footnote = "Percent of junior contributors blocked after posting a comment during the AB test",
+    locations = cells_column_labels(
+      columns = 'pct_blocked'
+    )
   )  
 
 blocked_users_bywiki_jc_tbl
 ```
 
-Overall, across all participating Wikipedias, 1.81% of reply tool Junior Contributors were blocked after posting a comment with the reply tool, which is not signficantly different than the percent of non-reply tool Junior Contributors that were blocked during the same timeframe.
+Overall, across all participating Wikipedias, 1.94% of reply tool Junior Contributors were blocked after posting a comment with the reply tool, which is only slightly higher than the percent of Junior Contributors that were blocked after making a comment using page editing during the same timeframe (1.79%)
 
-Under 3% of all Junior Contributors were blocked on all participating Wikipedias with the exception of Ukranian Wikipedia and Portuguese Wikipedia. 12.5% of Ukranian Wikipedia Junior Contributors reply tool users were blocked; however, comments were only posted by 16 users on this project during the reviewed timeframe and we confirmed that the two users blocked were the same ones blocked after using the non-reply tool as well.
+Under 3.5% of all Junior Contributors that used the reply tool were blocked on all participating Wikipedias with the exception of Ukranian Wikipedia and Indonesisan Wikipedia. 8.33% of Ukranian Wikipedia Junior Contributors reply tool users were blocked; however, comments were only posted by 24 users on this project during the reviewed timeframe and we confirmed that the two users blocked were the same ones blocked after using the non-reply tool as well. Indonesian Wikipedia only had 12 users that made a comment with the reply tool during the AB test and therefore it is difficult to accurately confirm if this percent blocked rate is representative of the population.
 
 
-## Blocked Users By Experience Level
+### Blocked users By experience level
 ```{r blocked_users_byexperience, echo = FALSE}
 blocked_users_byexperience <- blocked_reply_users %>%
     group_by(editing_interface, experience_level) %>%
     summarise(total_blocked_users = sum(blocked_user),
               total_users = sum(all_users),
-              pct_blocked_reply_users = round(total_blocked_users/total_users * 100, 2), .groups = 'drop')
+              pct_blocked = paste(round(total_blocked_users/total_users * 100, 2), "%")
+              , .groups = 'drop')
 
 ```
 
@@ -948,36 +1346,334 @@ blocked_users_byexperience <- blocked_reply_users %>%
 blocked_users_byexperience_tbl <- blocked_users_byexperience   %>%
   gt() %>%
   tab_header(
-    title = "Contributors Blocked After Publishing a Comment By Experience Level"
+    title = "Contributors blocked after publishing a comment by experience level"
+  )   %>%
+  cols_label(
+    editing_interface = "Editing experience",
+    experience_level = "Experience level",
+    total_blocked_users = "Number of users blocked",
+    total_users = "Number of users that made a comment",
+    pct_blocked = "Percent of users blocked"
+  ) %>%
+
+  tab_footnote(
+    footnote = "Data comes from mediawiki_user_history",
+    locations = cells_column_labels(
+      columns = 'editing_interface'
+    )
+  ) %>%
+  tab_footnote(
+    footnote = "Percent of Junior Contributors blocked after posting a comment during the AB test",
+    locations = cells_column_labels(
+      columns = 'pct_blocked'
+    )
   )  
 
 
 blocked_users_byexperience_tbl
 ```
 
-```{r blocked_reply_users_byexperience_plot, echo = FALSE}
+```{r blocked_reply_users_byexperience_cap , echo=FALSE}
+blocked_reply_users_byexperience_cap <- format_caption(figure_caps, "All contributors blocked by experience level")
+```
+
+
+```{r blocked_reply_users_byexperience_plot, echo = FALSE, fig.cap = blocked_reply_users_byexperience_cap }
 # plot proportion of edit complets by use of reply tool and experience level
 
 p <- blocked_users_byexperience  %>%
   ggplot(aes(x= editing_interface, y = total_blocked_users/total_users, fill = editing_interface)) +
   geom_col(position = 'dodge') +
+  geom_text(aes(label = paste(pct_blocked), fontface=2), vjust=1.2, size = 8, color = "white") +
   scale_y_continuous(labels = scales::percent) +
   facet_grid(~ experience_level) +
   labs (y = "Percent of blocked users",
-        x = "Editing interface",
+        x = "Editing experience",
         title = "Contributors blocked after posting a comment by experience level")  +
   theme_bw() +
-  scale_fill_brewer(name="Editing interface", palette="Set1")  +
+  scale_fill_brewer(name="Editing experience", palette="Set1")  +
    theme(
-    plot.title = element_text(hjust = 0.5),
+    plot.title = element_text(hjust = 0.5, size = 20),
     text = element_text(size = 16),
+    axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
+    strip.text.x = element_text(size = 12),
     axis.title.x = element_blank(),
     axis.text.x = element_blank(),
-    legend.position = "bottom"
+    legend.position = "bottom",
+    legend.title = element_text(size = 18),
+    legend.text = element_text(size = 18)
   )
 
 p
 
 ggsave("Figures/blocked_reply_users_byexperiencelevel.png", p, width = 16, height = 8, units = "in", dpi = 300)
 ```
+
+There's not a large difference in the percent of users blocked between experience levels. Under 2% of users were blocked in both experience levels and using both editing experience methods (page editing and reply tool).
+
+# Curiosities
+
+We also explored if the reply tool resulted in a greater number of Junior Contributors to start participating productively on talk pages and if it caused a greater percentage of Junior Contributors to continue participating productively on talk pages.
+
+## Number of Junior Contributors
+
+This metric was defined as the number of distinct Junior Contributors who make at least one edit to a page in a talk namespace that is not reverted within 48 hours. Since different sampling rates were applied to each editor type, we removed any events that were oversampled (sampling rate increased to 100%) to allow us to directly compare the numbers between the two groups.
+
+
+```{r num_jc_editors, echo = FALSE}
+num_jc_editors <- reply_edit_attempts %>%
+    filter(experience_level == 'Junior Contributor',
+          is_oversample == 'false' ) %>% #remove oversampled events
+    group_by(test_group, editor_interface)  %>%
+    summarise(total_users_attempt = n_distinct(user_id),
+              total_users_complete = n_distinct(user_id[edit_success == 'Complete'])) 
+
+```
+
+```{r num_jc_editors_table, echo = FALSE}
+num_jc_editors_table <- num_jc_editors %>%
+  gt() %>%
+  tab_header(
+    title = "Number of Junior Contributors that made a comment during the AB test by test group and interface"
+  )  %>%
+  cols_label(
+    test_group = "Test group",
+    editor_interface = "Editing experience",
+    total_users_attempt = "Number of users that attempted a comment",
+    total_users_complete = "Number of users that published a comment"
+  ) %>%
+  tab_footnote(
+    footnote = "Based on a sampling rate of 6.25% for all events. Any oversampled events were removed so data for the two editor types could be directly compared",
+    locations = cells_title(
+      )
+  ) %>%
+  tab_footnote(
+    footnote = "Users were not shown the reply tool by default",
+    locations = cells_row_groups(groups = "control")
+  ) %>%
+  tab_footnote(
+    footnote = "Users were shown the reply tool by default",
+    locations = cells_row_groups(groups = "test")
+  ) 
+ 
+num_jc_editors_table 
+```
+
+A few explanations regarding the numbers above:
+* There are Contributors for each editing experience type in each AB test group. This is because contributors within each group also had the option to explicitly turn the tool on or off in their preferences; however, these contributors remained in the same group they were bucketed in for the duration of the test. 
+* Reply tool comment attempts that appear in control are only for people who went and manually enabled the feature and then made a comment. 
+* There are a number of page editing Contributors in the test group because page editing is still available even when the reply tool is enabled. Contributors on a talk page might continue to use page editing because they not aware of the new reply tool, deciding to use what they know, or making corrective edits to the page.
+
+```{r num_jc_editors_cap, echo=FALSE}
+num_jc_editors_cap <- format_caption(figure_caps, "Number of junior contributors")
+```
+
+
+```{r num_jc_editors_bygroup_plot, echo = FALSE, fig.cap = num_jc_editors_cap  }
+p <-num_jc_editors %>%
+  group_by(test_group) %>%
+  summarise(total_user_complete = sum(total_users_complete)) %>%
+  ggplot(aes(x= test_group, y = total_user_complete, fill = test_group)) +
+  geom_col(position = 'dodge') +
+  geom_text(aes(label = paste(total_user_complete),fontface=2), vjust=1.2, size = 8, color = "white") +
+  labs (y = "Number of Junior Contributors",
+        x = "Test group",
+        title = "Number of Junior Contributors that completed a comment by test group \n across all participating Wikipedias")  +
+  theme_bw() +
+  scale_fill_brewer(name="Test group", palette="Set1")  +
+   theme(plot.title = element_text(hjust = 0.5, size = 20),
+          strip.text.x = element_text(size = 18),
+        axis.text.x = element_text(color = "grey20", size = 18,  hjust = .5, vjust = .5, face = "plain"),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
+        axis.title.x=element_blank(),
+        legend.position = "none")
+
+p
+
+ggsave("Figures/num_jc_editors_bygroup.png", p, width = 16, height = 8, units = "in", dpi = 300)
+```
+
+
+Across all participating Wikipedias, there were 23.8% more Junior Contributors complete a comment attempt when shown the reply tool enabled as default than users that were not shown the reply tool enabled on talk pages. 
+
+
+
+## Retention of Junior Contributors
+
+In addition, we looked into whether Junior Contributors that made at least one comment during the time of the AB test (our cohort) returned to make another comment on a talk namespace. Specifically, we calculated the percentage of Junior Contributors who who make at least one edit to a page in a talk namespace in each of the following retention windows: 
+* 1 week after making a comment (2 -8 days). Note: Since user activity naturally comes in bursts, we excluded the time (first 24 hours) immediately following the Contributors' first edit.
+* 2 weeks after making a comment (9- 15 days)
+
+Data for this analysis came from events logged in mediawiki_history. We only reviewed comments that were not reverted within 48 hours. Due to availability of data at the time of this analysis, we only reviewed retention that occured within the first and second week after the Contributor's first edit.
+
+Note that while the test was completed on 11 March 2021, users that were in the AB test continued to have the same experience, which allows us to compare user behavior that occured after the AB test. See [T276967)](https://phabricator.wikimedia.org/T276967).
+
+
+
+```{r retention_data, cache=TRUE, include=FALSE}
+# Loads retention data 
+week_one_retention <-
+  read.csv(
+    file = 'Data/week_one_retention_rate.csv',
+    header = TRUE,
+    sep = "\t",
+    stringsAsFactors = FALSE
+  ) 
+
+week_two_retention <-
+  read.csv(
+    file = 'Data/week_two_retention_rate.csv',
+    header = TRUE,
+    sep = "\t",
+    stringsAsFactors = FALSE
+  ) 
+
+```
+
+
+```{r}
+# Join all the data
+
+retention_rates_two <- inner_join(week_one_retention, week_two_retention)
+```
+
+
+```{r clean_retention_data, echo=FALSE}
+
+
+#clarify levels and labels for factor variables
+retention_rates_two$editing_interface <-
+  factor(
+    retention_rates_two$editing_interface,
+    levels = c("non-reply-tool", "reply-tool"),
+    labels = c("Page editing", "Reply tool")
+  )
+
+retention_rates_two$experience_level <-
+  factor(retention_rates_two$experience_level,
+         levels = c( "non-junior", "junior"),
+    labels = c("Non-Junior Contributor", "Junior Contributor")
+  )
+
+```
+
+```{r retention_rates_jc_table, echo = FALSE}
+# Restrict to just Junior Contributors
+retention_rates_jc_table <- retention_rates_two %>%
+    filter(experience_level == 'Junior Contributor') %>%
+    group_by(editing_interface) %>%
+   summarise(week_1 = paste(round((first_week_retention_rate * 100), 2), "%"),
+          week_2= paste(round((two_week_retention_rate * 100), 2), "%"))  %>%
+  gt() %>%
+  tab_header(
+    title = "Junior contributors retention rate"
+  )  %>%
+  cols_label(
+    editing_interface = "Editing experience",
+    week_1 = "Week 1 (2-8 days)",
+    week_2 = "Week 2 (9-15 days)"
+  ) %>%
+  tab_footnote(
+    footnote = "Defined as percent of contributors that made a comment during the AB test and returned to make another comment.",
+    locations = cells_title(
+    )
+  ) %>%
+  tab_footnote(
+    footnote = "Sampling rate for Non-Reply Tool events is 6.25%",
+    locations = cells_column_labels(
+      columns = 'editing_interface')
+    )   %>%
+  tab_footnote(
+    footnote = "Defined as days since first comment during the AB test.",
+    locations = cells_column_labels(
+      columns = c('week_1', 'week_2'))
+    )   
+
+retention_rates_jc_table
+```
+
+```{r jc_retention_plot_cap, echo=FALSE}
+jc_retention_plot_cap <- format_caption(figure_caps, "Retention of junior contributors")
+```
+
+
+```{r jc_retention_plot, echo = FALSE, fig.cap = jc_retention_plot_cap}
+# Plot edit completion rates for each user on each wiki  
+p <- retention_rates_two %>%
+    filter(experience_level == 'Junior Contributor') %>%
+    gather("week", "retention_rate", 3:4) %>%
+    mutate(week = factor(week,
+                         levels = c("first_week_retention_rate", "two_week_retention_rate"),
+                         labels = c("week 1", "week 2")))  %>%
+    ggplot(aes(x= editing_interface, y = retention_rate*100, fill = editing_interface)) +
+    geom_col(position = 'dodge') +
+    geom_text(aes(label = paste(round(retention_rate*100, 2), "%"), fontface=2), vjust=1.2, size = 8, color = "white") +
+    facet_wrap(~ week) +
+    scale_y_continuous() +
+    labs (y = "Percent of Junior Contributors ",
+          title = "Junior contributors retention rate")  +
+    theme_bw() +
+    scale_fill_brewer(name="Editing experience", palette="Set1")  +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 20),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.y = element_text(color = "grey20", size = 18, angle = 90, hjust = .5, vjust = .5, face = "plain"),
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+         strip.text.x = element_text(size = 18),
+          legend.position = "bottom",
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 18))
+
+      
+p
+ggsave("Figures/jc_retention_rate.png", p, width = 16, height = 8, units = "in", dpi = 300)
+```
+
+There is not a lot of variation between the retention rates observed for page editing and the reply tool. Most Contributors that returned to make an edit within the first two week made their return edit within week 1 (2 to 8 days following their first). 
+
+### By Experience Level
+
+```{r retention_rates_byexp_cap, echo=FALSE}
+retention_rates_byexp_cap <- format_caption(figure_caps, "Retention of all contributors by experience level")
+```
+
+
+```{r retention_rates_byexp_plot, echo = FALSE, fig.cap = retention_rates_byexp_cap }
+# Plot edit completion rates for each user on each wiki  
+p <-  retention_rates_two %>%
+    gather("week", "retention_rate", 3:4) %>%
+    mutate(week = factor(week,
+                         levels = c("first_week_retention_rate", "two_week_retention_rate"),
+                         labels = c("week 1", "week 2")))  %>%
+    ggplot(aes(x= editing_interface, y = retention_rate*100, fill = editing_interface)) +
+    geom_col(position = 'dodge') +
+    geom_text(aes(label = paste(round(retention_rate*100, 2), "%"), fontface=2), vjust=1.2, size = 8, color = "white") +
+    facet_grid(experience_level ~ week ) +
+    scale_y_continuous() +
+    labs (y = "Percent of contributors ",
+          title = "Contributors retention rate by experience level")  +
+    theme_bw() +
+    scale_fill_brewer(name="Editing experience", palette="Set1")  +
+    theme(
+        plot.title = element_text(hjust = 0.5, size = 20),
+        axis.text.y = element_text(color = "grey20", size = 18, angle = 0, hjust = 1, vjust = 0, face = "plain"),
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        strip.text.x = element_text(size = 18),
+        strip.text.y = element_text(size = 18),
+        legend.position = "bottom",
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 18)
+)
+      
+p
+
+ggsave("Figures/retention_rate_byexperience.png", p, width = 16, height = 8, units = "in", dpi = 300)
+````
+
+Broken down by experience level, we see a higher retention rate of Non-Junior Contributors compared to Junior Contributors for both editing experience types; however, there is not a lot of variation between the page editing and reply tool retention rates for either editing experience type. Most Contributors that returned to make an edit within the first two week made their return edit within week 1 (2 to 8 days following their first).
+
+
 

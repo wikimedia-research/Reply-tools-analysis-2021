@@ -12,7 +12,7 @@ SELECT
     IF(ARRAY_CONTAINS(revision_tags, 'discussiontools'), 'reply-tool', 'non-reply-tool') AS editing_interface
 FROM wmf.mediawiki_history AS mh
 WHERE 
-    snapshot = '2021-02'
+    snapshot = '2021-03'
     -- do not include new discussion tool talk page edits
     AND NOT (ARRAY_CONTAINS(revision_tags, 'discussiontools-newtopic'))
     -- include only desktop edits
@@ -25,7 +25,7 @@ WHERE
     AND event_type = 'create'
     -- dates of the AB Test within Feb
     AND event_timestamp >= '2021-02-12' 
-    AND event_timestamp < '2021-02-28'
+    AND event_timestamp <= '2021-03-09'
     -- on all participating wikis
     AND wiki_db IN ('frwiki', 'eswiki', 'itwiki', 'jawiki', 'fawiki', 'plwiki', 'hewiki', 'nlwiki',
     'hiwiki', 'kowiki', 'viwiki', 'thwiki', 'ptwiki', 'bnwiki', 'arzwiki', 'swwiki', 'zhwiki',
@@ -48,8 +48,8 @@ FROM(
     SELECT *
     FROM wmf.mediawiki_user_history
 WHERE 
-    snapshot = '2021-02'
-    AND start_timestamp BETWEEN '2021-02-12' AND '2021-02-28'
+    snapshot = '2021-03'
+    AND start_timestamp BETWEEN '2021-02-12' AND '2021-03-09'
     AND wiki_db IN ('frwiki', 'eswiki', 'itwiki', 'jawiki', 'fawiki', 'plwiki', 'hewiki', 'nlwiki',
     'hiwiki', 'kowiki', 'viwiki', 'thwiki', 'ptwiki', 'bnwiki', 'arzwiki', 'swwiki', 'zhwiki',
     'ukwiki', 'idwiki', 'amwiki', 'omwiki', 'afwiki')
@@ -57,8 +57,9 @@ WHERE
     AND inferred_from IS NULL) as h1
 LEFT JOIN (
 SELECT * FROM wmf.mediawiki_user_history
-    WHERE snapshot = '2021-02'
-    AND end_timestamp BETWEEN '2021-02-12' AND '2021-02-28'
+    WHERE 
+    snapshot = '2021-03'
+    AND end_timestamp BETWEEN '2021-02-12' AND '2021-03-09'
     AND wiki_db IN ('frwiki', 'eswiki', 'itwiki', 'jawiki', 'fawiki', 'plwiki', 'hewiki', 'nlwiki',
     'hiwiki', 'kowiki', 'viwiki', 'thwiki', 'ptwiki', 'bnwiki', 'arzwiki', 'swwiki', 'zhwiki',
     'ukwiki', 'idwiki', 'amwiki', 'omwiki', 'afwiki')

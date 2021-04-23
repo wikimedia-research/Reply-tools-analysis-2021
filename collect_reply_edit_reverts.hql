@@ -14,7 +14,7 @@ SELECT
     COUNT(*) as num_comments
 FROM wmf.mediawiki_history 
 WHERE 
-    snapshot = '2021-02'
+    snapshot = '2021-03'
     -- do not include new discussion tool talk page edits
     AND NOT (ARRAY_CONTAINS(revision_tags, 'discussiontools-newtopic'))
     -- include only desktop edits
@@ -25,9 +25,9 @@ WHERE
     AND page_namespace_historical % 2 = 1
     AND event_entity = 'revision'
     AND event_type = 'create'
-    -- dates of the AB Test within Feb
+    -- dates of the AB Test plus 48 hours after
     AND event_timestamp >= '2021-02-12' 
-    AND event_timestamp < '2021-02-28'
+    AND event_timestamp < '2021-03-12'
     -- on all participating wikis
     AND wiki_db IN ('frwiki', 'eswiki', 'itwiki', 'jawiki', 'fawiki', 'plwiki', 'hewiki', 'nlwiki',
     'hiwiki', 'kowiki', 'viwiki', 'thwiki', 'ptwiki', 'bnwiki', 'arzwiki', 'swwiki', 'zhwiki',
